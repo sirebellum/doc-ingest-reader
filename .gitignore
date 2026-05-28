@@ -63,6 +63,9 @@ android/build/
 .classpath
 .settings/
 .agents/
+.clinerules
+.cursorrules
+.gemini/
 
 # ------------------------------------------
 # Environment Variables & Secrets
