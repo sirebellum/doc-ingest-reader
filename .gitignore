@@ -1,0 +1,111 @@
+# ==========================================
+# LLM PDF Ingest & Reader App - .gitignore
+# ==========================================
+
+# ------------------------------------------
+# OS / System Files
+# ------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------
+# Node / Javascript (React Native / Expo)
+# ------------------------------------------
+node_modules/
+/mobile/node_modules/
+.npm
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.eslintcache
+.eslintcache*
+
+# Expo / EAS / Metro build files
+.expo/
+dist/
+web-build/
+mobile-build/
+ios/build/
+android/build/
+/mobile/ios/
+/mobile/android/
+*.apk
+*.aab
+*.ipa
+
+# ------------------------------------------
+# Rust Core
+# ------------------------------------------
+/rust_core/target/
+# Cargo.lock is kept committed since this is an application workspace,
+# but we ignore target/ directories.
+
+# ------------------------------------------
+# IDEs / Editors / Development Tools
+# ------------------------------------------
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+.agents/
+
+# ------------------------------------------
+# Environment Variables & Secrets
+# ------------------------------------------
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# ------------------------------------------
+# Local Databases & SQLite Sandbox
+# ------------------------------------------
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# ------------------------------------------
+# LLM Models / Local Inference
+# ------------------------------------------
+# Ignore large binary weights / local model files
+*.bin
+*.gguf
+/models/
+/rust_core/models/
+
+# ------------------------------------------
+# Downloaded / Ingested Documents & Sandboxes
+# ------------------------------------------
+# Keep standard repository assets under /assets,
+# but ignore ingested sandbox documents, extracts, and temporary storage
+*.pdf
+*.epub
+/mobile/assets/sandbox/
+/mobile/assets/extracted/
+output/
+downloads/
+tmp/
+temp/
+/scratch/

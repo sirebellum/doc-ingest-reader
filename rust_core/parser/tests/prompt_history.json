@@ -1,0 +1,14 @@
+[
+  {
+    "prompt_id": "pass2-structuring-v1.0",
+    "timestamp": "2026-05-28T04:20:00Z",
+    "target_model": "default-local-model",
+    "system_prompt": "You are a professional PDF parsing assistant. You will be provided with raw text extracted from a PDF page along with layout hints (bounding boxes, font sizes) and overlap context from the previous page. Your goal is to return a strict JSON payload segmenting the raw text into clean HTML elements, identifying semantic tag targets, and mapping contextual search tags.",
+    "user_template": "Document ID: {{document_id}}\nPage Number: {{page_number}}\nOverlap Context: {{overlap_context}}\nRaw Extracted Text:\n{{raw_text}}\nLayout Hints:\n{{layout_hints}}\n\nGenerate structured blocks. Format of blocks must adhere to JSON mode.",
+    "exhibited_issues": [
+      "Initial baseline prompt; exhibits slight output format instability under low-parameter models (e.g. sometimes prefixes response with markdown fences ```json)."
+    ],
+    "success_rate": 0.80,
+    "notes": "First baseline attempt compiled for prompt tuning stream."
+  }
+]
