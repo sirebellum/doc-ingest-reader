@@ -9,6 +9,14 @@ Pod::Spec.new do |s|
   s.platform       = :ios, '13.0'
   s.source         = { :path => '.' }
   
+  s.prepare_command = <<-CMD
+    if [ ! -f "../../../../rust_core/libs/aarch64-apple-ios/libparser.a" ] || [ ! -f "../../../../rust_core/libs/aarch64-apple-ios/libinference.a" ]; then
+      echo "Error: Required Rust static libraries not found in rust_core/libs/aarch64-apple-ios/. Please build them first (e.g. using 'cmake --build . --target rust_core_libs' with BUILD_IOS_FRAMEWORK=ON)." >&2
+      exit 1
+    fi
+  CMD
+
+  
   # Include files from pod directory and the C++ bridge directories
   s.source_files   = '**/*.{h,m,mm,cpp}', '../../../../mobile/src/native/cpp/*.{h,cpp}'
   s.header_dir     = 'RustParserBridgeModule'

@@ -43,3 +43,15 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.20"
     implementation "com.facebook.react:react-native:+" // Inherits from standard project
 }
+
+task checkRustLibs {
+    doLast {
+        def parserLib = project.file('../../../../rust_core/libs/aarch64-linux-android/libparser.a')
+        def inferenceLib = project.file('../../../../rust_core/libs/aarch64-linux-android/libinference.a')
+        if (!parserLib.exists() || !inferenceLib.exists()) {
+            throw new GradleException("Required Rust core static libraries not found! Please build them first (e.g. using 'cmake --build . --target rust_core_libs' with BUILD_ANDROID_APK=ON).")
+        }
+    }
+}
+preBuild.dependsOn checkRustLibs
+

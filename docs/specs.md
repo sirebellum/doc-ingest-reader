@@ -259,3 +259,7 @@ CREATE TABLE job_chunks (
 
 ### [v1.9.0] - 2026-06-04
 - **Database Schema Remediation & Web SQL Mocking**: Aligned the local DDL schema in `schema.ts` to include missing tables (`layout_height_cache`, `vector_cache`) and updated the SQL triggers to parse and extract indexable plain-text dynamically from the standardized JSON AST structures, preventing search pollution. Polyfilled SQLite web support via `Platform.OS === 'web'` checks.
+
+### [v2.0.0] - 2026-06-04
+- **Unified CMake Build & Test Automation Wrapper**: Restructured the workspace build configurations under a single root-level CMake configuration. Features architecture-level parameters for NDK compilation toolchains and iOS simulator framework builds, automatic offline-safe upstream checks for `llama.cpp` using local cache folders, and integrated validation passes for automated CTest and Jest testing architectures.
+

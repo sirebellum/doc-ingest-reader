@@ -321,6 +321,10 @@ When importing `shared_notes.json`:
 ### [v2.7.0] - 2026-06-04
 - **On-Device Model Downloader & End-to-End LLM Ingestion Pipeline Verification**: Built the resilient, range-resumable chunked model downloader in `rust_core/inference` and registered it via FFI bindings. Created E2E integration test `e2e_llm_ingestion.rs` executing layout analysis, download verification, delineator synthesis, purging of overlap contexts, and atomic SQLite transaction indexing. Launched local desktop database server gateway and Expo developer Metro server to verify end-to-end rendering on browser platforms.
 
+### [v2.8.0] - 2026-06-04
+- **Unified CMake Build & Test Automation Wrapper**: Overhauled the top-level build workspace structure by introducing configuration toggles `BUILD_ANDROID_APK` (Default: `OFF`), `BUILD_IOS_FRAMEWORK` (Default: `OFF`), `RUN_INTEGRATION_TESTS` (Default: `ON`), and `LLAMA_NATIVE` (Default: `OFF`). Created sub-level `CMakeLists.txt` configurations for `/rust_core` and `/mobile` directing Cargo and Node task compilation chains. Configured CMake modules (`FetchContent`) to fetch and compile upstream dependencies (`llama.cpp`) with offline caching validation, integrated test setups for Cargo, Jest, and README validation checks via CTest, and added pre-build safety gates inside local JSI modules (`build.gradle` and `RustParserBridgeModule.podspec`).
+
+
 
 
 
