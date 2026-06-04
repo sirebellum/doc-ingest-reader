@@ -1,0 +1,10 @@
+{
+  "name": "wireless-sync",
+  "version": "1.0.0",
+  "description": "Native BLE and mDNS Zeroconf offline sync module for Expo",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

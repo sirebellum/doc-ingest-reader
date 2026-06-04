@@ -1,0 +1,30 @@
+appId: com.llmpdfingest.mobile
+---
+# 1. Launch App and Navigate to Visual Concept Map
+- launchApp
+- assertVisible: "Library Outline"
+
+# 2. Open Concept Graph Screen
+- tapOn: "Visual Concept Map"
+- assertVisible: "Visual Concept Map"
+
+# 3. Trigger Bluetooth LE (BLE) Sync Fallback Modal
+- tapOn: "BLE Sync"
+- assertVisible: "BLE Fallback Sync Delta"
+- assertVisible: "Sending delta chunks..."
+- assertVisible: "Packets: 100/100"
+- assertVisible: "Reassembly: Success"
+- tapOn: "Dismiss"
+
+# 4. Open Split-Pane Conflict Resolution Editor
+- tapOn: "Resolve Conflicts"
+- assertVisible: "Visual Conflict Resolution"
+- assertVisible: "Ours (Local edits)"
+- assertVisible: "Theirs (Peer imports)"
+- assertVisible: "Consolidated note output"
+
+# 5. Commit Conflict Resolution
+- tapOn: "Commit Merge"
+- assertVisible: "Success"
+- assertVisible: "The note conflict has been successfully resolved and saved."
+- tapOn: "OK"

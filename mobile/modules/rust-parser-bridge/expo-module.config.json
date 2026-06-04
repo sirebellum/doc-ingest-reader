@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["RustParserBridgeModule"]
+  },
+  "android": {
+    "modules": ["mobile.rustparserbridge.RustParserBridgeModule"]
+  }
+}

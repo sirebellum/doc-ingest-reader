@@ -57,3 +57,31 @@ Pass 2 prompts are strictly versioned, tracked, and tested to ensure they do not
 - [ ] **Schema Compliance**: LLM responses must strictly adhere to the `blocks` array output contract.
 - [ ] **Layout Integrity**: Golden test files verify multi-column tables, nested list sequences, and code listings are parsed without tag misalignment.
 - [ ] **Token Limits**: System prompting remains lightweight, preventing context fatigue on local 4-bit quantized mobile models.
+
+---
+
+## 5. Change Log & Addendums
+
+### [v1.1.0] - 2026-05-28
+- **Phase 10 Dynamic Image Extraction**: Implemented type-safe character iteration (`page_text.chars().iter()`) using `c.loose_bounds()` and `c.unicode_string()`. Formulated high-fidelity image extraction utilizing `pdfium-render` (`as_image_object()` and `get_processed_image(&doc)`) with `/Subtype /Image` stream fallbacks in `lopdf::Stream::decompressed_content()`. Decodes standard compression filters, hashes raw bytes under SHA-256, and writes compressed sandbox PNGs. Returns physical coordinates, dimensions, and local portable `local-asset://` URIs inside `PageExtraction` contracts.
+
+### [v1.2.0] - 2026-05-28
+- **Phase 13 Multi-Format Parser Integration (EPUB, HTML, Markdown)**: Extended native Rust core extraction interface to support static structured analysis. Built lightweight Markdown line parser in Rust (extracting recursive headings, paragraphs, lists, quotes, images), standardizing DOM-like tags parser for HTML (stripping head/script elements and parsing tables), and spine chapter crawler for EPUB. Extended JSI Promise bridge mock fallbacks inside `RustParserBridge.ts` to allow 100% test and simulator portability. Structured multi-format outputs route dynamically in background workers, populating schema-conformant tables directly inside atomic transactions.
+
+### [v1.3.0] - 2026-06-03
+- **Rust Core JSON AST Schema Standardization**: Refactored static and multi-format parsers in `rust_core/parser/src/lib.rs` (and JS mock counterparts in `RustParserBridge.ts` under `parsePDFAsync`) to output serialized JSON-based Semantic AST structures (`ASTNode`) instead of XHTML tag strings. This includes table, heading, paragraph, list, and quote block types, ensuring that the ingestion pipeline outputs standardized data structures.
+
+### [v1.4.0] - 2026-06-03
+- **Pass 2 LLM Delineation & Context Filtering**: Decoupled static layout extraction from Pass 2 semantic transformation by implementing a dedicated `rust_core/delineator` crate. Added prompt-building logic to utilize 100-token semantic overlap context for page continuity while filtering it out of final output blocks. Integrated C FFI bindings (`delineate_page_ffi` and `free_rust_delineator_string`) with the React Native JSI C++ bridge `delineatePageAsync` resolving on background worker threads. Expose HTTP `/delineate` endpoint in the Desktop Server.
+
+### [v1.5.0] - 2026-06-03
+- **E2E Integration Testing Pipeline**: Created integration test harness verifying static layout parsing, image hashes, delineator context filtering, and SQLite FTS database schema serialization.
+
+### [v1.6.0] - 2026-06-04
+- **Line-Based Layout Sorting & Segment Grouping**: Implemented a line-level layout analysis algorithm grouping raw PDF character/word tokens by vertical center proximity (with 8.0 PostScript points tolerance) to prevent false-positive column-segmentation results on single-column documents. Introduced vertical top-to-bottom and horizontal left-to-right sorting orders on grouped lines, securing 100% token order accuracy across multi-page, text-heavy PDFs. Integrated a localized test harness `research_notes_test.rs` to verify ingestion boundaries.
+
+### [v1.7.0] - 2026-06-04
+- **End-to-End LLM Ingestion Pipeline & Model Downloader Integration Test**: Added a comprehensive integration test suite `e2e_llm_ingestion.rs` under `rust_core/parser/tests/`. The suite verifies model downloading resiliency, sandbox validation, range-header resume operations, post-download checksum validations, layout extraction, overlap context purging, SQLite serialization, and FTS5 synchronization.
+
+
+

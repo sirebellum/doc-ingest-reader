@@ -1,6 +1,45 @@
-import { isTabletWidth, getScrollAction } from '../FlashListReader';
+jest.mock('expo-file-system', () => ({
+  documentDirectory: 'file:///mock-sandbox/',
+}));
 
-describe('FlashListReader Pure Helper Logic', () => {
+jest.mock('react-native-render-html', () => 'RenderHTML');
+
+jest.mock('@shopify/flash-list', () => {
+  const React = require('react');
+  return {
+    FlashList: jest.fn(({ data, renderItem, estimatedItemSize, onScroll }) => {
+      return React.createElement('FlashList', { estimatedItemSize, onScroll }, data ? data.map((item: any, idx: number) => renderItem({ item, index: idx })) : null);
+    }),
+  };
+});
+
+import React from 'react';
+import { FlashListReader, isTabletWidth, getScrollAction } from '../FlashListReader';
+
+describe('FlashListReader Rendering & Scrolling Core', () => {
+  const mockBlocks = [
+    { id: 'b-1', section_id: 'sec-1', document_id: 'd-1', block_type: 'heading', content: '<h1>Header</h1>', sort_order: 1 },
+    { id: 'b-2', section_id: 'sec-1', document_id: 'd-1', block_type: 'paragraph', content: '<p>Body text</p>', sort_order: 2 }
+  ];
+
+  it('should instantiate a valid FlashListReader element with estimatedItemSize and recycling data', () => {
+    const mockLoad = jest.fn();
+    const element = (
+      <FlashListReader
+        initialSectionId="sec-1"
+        blocks={mockBlocks}
+        onLoadAdjacentSection={mockLoad}
+        nextSectionId="sec-2"
+        prevSectionId="sec-0"
+      />
+    );
+
+    expect(element.type).toBe(FlashListReader);
+    expect(element.props.blocks).toEqual(mockBlocks);
+    expect(element.props.nextSectionId).toBe('sec-2');
+    expect(element.props.prevSectionId).toBe('sec-0');
+  });
+
   describe('isTabletWidth', () => {
     it('should return false for widths below 768 (smartphone profile)', () => {
       expect(isTabletWidth(375)).toBe(false);
@@ -18,7 +57,6 @@ describe('FlashListReader Pure Helper Logic', () => {
     const nextSec = 'sec-3';
 
     it('should return null when scroll position is in the stable middle range', () => {
-      // 500 is in the middle of 3000 (10% boundary is 300)
       const action = getScrollAction(500, 1000, 3000, prevSec, nextSec);
       expect(action).toBeNull();
     });
@@ -29,7 +67,6 @@ describe('FlashListReader Pure Helper Logic', () => {
     });
 
     it('should trigger next prefetch when scroll position is near the bottom chapter limit', () => {
-      // 1850 + 1000 = 2850 (which is inside 90% of 3000, i.e., past 2700)
       const action = getScrollAction(1850, 1000, 3000, prevSec, nextSec);
       expect(action).toEqual({ sectionId: 'sec-3', direction: 'next' });
     });

@@ -1,14 +1,20 @@
 export const PASS2_SYSTEM_PROMPT = `You are a high-performance PDF layout structuring engine.
-Your task is to take raw, layout-analyzed text segmentations and format them into clean, sanitized, semantic XHTML blocks.
+Your task is to take raw, layout-analyzed text segmentations and format them into a structured JSON payload containing semantic blocks. Each block has a "content" field that is a JSON-based Semantic AST Node.
 
 Rules:
-1. Output MUST be valid JSON matching the exact schema provided.
-2. The "html_content" must be valid, clean, and sanitized semantic XHTML tags (e.g. <h2>, <p>, <ul>, <ol>, <li>, <blockquote>, <table>, <tr>, <td>, <th>, <pre>, <code>).
-3. Do NOT include absolute local paths for images. If layout hints represent an image asset, use the custom URI format: "local-asset://[image_id].png".
-4. Extract lowercase, whitespace-stripped keywords into "semantic_tags" to construct concept indexes.
-5. Extract structural cross-references and internal link anchor targets into "hyperlink_targets".
-6. Wrap headings with clear "id" attributes derived from their content for semantic linking (e.g. <h2 id="introduction">Introduction</h2>).
-7. Do not include markdown or external code block wrappers in your response. Only return the pure JSON object.`;
+1. Output MUST be valid JSON matching the LLMStructuringOutput schema: { blocks: ExtractedBlock[] }
+2. Each block has "block_type" ('heading', 'paragraph', 'table', 'code', 'image', 'quote'), "content" (JSON ASTNode), "hyperlink_targets" (string[]), and "semantic_tags" (string[]).
+3. The ASTNode schema is a tagged union with "type" field:
+   - Heading: { type: "heading", level: number, children: ASTNode[] }
+   - Paragraph: { type: "paragraph", children: ASTNode[] }
+   - Text: { type: "text", text: string, bold?: boolean, italic?: boolean, code?: boolean }
+   - Link: { type: "link", url: string, children: ASTNode[] }
+   - Image: { type: "image", src: string, alt?: string, caption?: string }
+   - Table: { type: "table", rows: { cells: { children: ASTNode[], is_header?: boolean }[] }[] }
+   - Quote: { type: "quote", children: ASTNode[] }
+   - CodeBlock: { type: "code_block", code: string, language?: string }
+   - List: { type: "list", ordered: boolean, items: { children: ASTNode[] }[] }
+4. Do NOT include markdown wrappers or external code block fences (e.g. \`\`\`json) in your response. Only return the pure JSON object.`;
 
 export interface PromptPayload {
   document_id: string;

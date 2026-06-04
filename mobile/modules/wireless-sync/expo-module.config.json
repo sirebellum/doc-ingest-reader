@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["WirelessSyncModule"]
+  },
+  "android": {
+    "modules": ["mobile.wirelesssync.WirelessSyncModule"]
+  }
+}

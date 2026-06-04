@@ -3,6 +3,9 @@ name = "parser"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["staticlib", "rlib"]
+
 [dependencies]
 lopdf = "0.31.0"
 pdfium-render = "0.8.0"
@@ -10,3 +13,20 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 sha2 = "0.10"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+contracts = { path = "../contracts" }
+delineator = { path = "../delineator" }
+
+[dev-dependencies]
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+uuid = { version = "1.8", features = ["v4"] }
+inference = { path = "../inference" }
+printpdf = "0.7.0"
+
+[[test]]
+name = "e2e_synthetic_validation"
+path = "../tests/e2e_synthetic_validation.rs"
+
+
+
+

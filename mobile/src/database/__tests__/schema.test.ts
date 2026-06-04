@@ -38,9 +38,11 @@ describe('Database Schema DDL & Triggers Verification', () => {
       'corpora',
       'documents',
       'job_chunks',
+      'layout_height_cache',
       'processing_jobs',
       'sections',
       'tags',
+      'vector_cache',
     ];
 
     expectedTables.forEach(table => {

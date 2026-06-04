@@ -3,6 +3,7 @@
     "name": "LLM PDF Ingest & Reader App",
     "slug": "llm-pdf-reader",
     "version": "1.0.0",
+    "scheme": "llm-pdf-ingest",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -24,7 +25,12 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/favicon.png",
+      "bundler": "webpack"
+    },
+    "plugins": [
+      "./plugins/withNativeLibraries",
+      "expo-router"
+    ]
   }
 }

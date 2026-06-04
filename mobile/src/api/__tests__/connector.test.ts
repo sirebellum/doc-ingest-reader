@@ -43,7 +43,7 @@ describe('LLM Ingestion Connector Tests', () => {
 
       expect(response.blocks.length).toBe(2);
       expect(response.blocks[0].block_type).toBe('heading');
-      expect(response.blocks[0].html_content).toContain('Mock Chapter 2');
+      expect((response.blocks[0].content as any).children[0].text).toContain('Local Inference');
       expect(response.blocks[1].block_type).toBe('paragraph');
     });
   });
@@ -67,7 +67,10 @@ describe('LLM Ingestion Connector Tests', () => {
               blocks: [
                 {
                   block_type: 'paragraph',
-                  html_content: '<p>Ollama paragraph</p>',
+                  content: {
+                    type: 'paragraph',
+                    children: [{ type: 'text', text: 'Ollama paragraph', bold: null, italic: null, code: null }]
+                  },
                   hyperlink_targets: [],
                   semantic_tags: ['local-ollama'],
                 },
@@ -102,7 +105,11 @@ describe('LLM Ingestion Connector Tests', () => {
                   blocks: [
                     {
                       block_type: 'heading',
-                      html_content: '<h1>Cloud Heading</h1>',
+                      content: {
+                        type: 'heading',
+                        level: 1,
+                        children: [{ type: 'text', text: 'Cloud Heading', bold: null, italic: null, code: null }]
+                      },
                       hyperlink_targets: [],
                       semantic_tags: ['cloud-openai'],
                     },

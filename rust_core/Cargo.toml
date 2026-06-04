@@ -1,2 +1,5 @@
 [workspace]
-members = ["parser", "inference"]
+members = ["parser", "inference", "desktop_server", "contracts", "delineator"]
+resolver = "2"
+
+

@@ -70,3 +70,11 @@ If `shared_notes.json` templates are imported for documents with mismatched SHA-
    ```
 2. **Offset Recalculation**: Compares character offsets relative to FTS5 matches to fuzzy re-align the anchor at the appropriate text segment.
 3. **Orphan Sidebar Fallback**: If no high-confidence block match can be found, the annotation is isolated inside the **Orphan Notes** sidebar.
+
+---
+
+## 6. Change Log & Addendums
+
+### [v1.1.0] - 2026-06-03
+- **Recursive JSON AST Native Renderer**: Replaced the legacy HTML rendering wrapper (`react-native-render-html`) in `BlockCell` and reader views with a native recursive rendering engine. Traversing the unified JSON AST (`ASTNode`) format, it maps elements directly to high-performance React Native `<Text>`, `<View>`, and `<Image>` primitives. This supports tailored font styling, clean borders, inline code, and list nesting.
+- **AST-Aware Pagination Reflow**: Overhauled `paginateBlocks` and height estimation helpers in `mobile/src/database/pagination.ts` and the `HorizontalReflowReader.tsx` view layer. Dynamic heights, page segment offsets, and sliced text nodes are now resolved using the AST helper `getPlainTextFromAST` to ensure precise word-boundary paging.

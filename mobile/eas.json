@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 5.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "CARGO_FEATURE_LLAMA_NATIVE": "0"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "CARGO_FEATURE_LLAMA_NATIVE": "1",
+        "LLAMA_LIB_PATH": "../../rust_core/libs"
+      }
+    },
+    "production": {
+      "env": {
+        "CARGO_FEATURE_LLAMA_NATIVE": "1",
+        "LLAMA_LIB_PATH": "../../rust_core/libs"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

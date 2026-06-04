@@ -1,0 +1,43 @@
+appId: com.llmpdfingest.mobile
+---
+# 1. Launch App and Open Reader Settings
+- launchApp
+- assertVisible: "Library Outline"
+- tapOn: "Offline Synchronizations DDL"
+
+# 2. Peer-to-Peer Wi-Fi Sync Discovery & handshakes
+- tapOn: "🌐 Local Network Sync"
+- assertVisible: "P2P Network Sync Service"
+- assertVisible: "Searching for peers on local network..."
+- assertVisible: "phone-1" # Simulated discovered smartphone peer
+- tapOn: "Connect to phone-1"
+- assertVisible: "Connected to phone-1"
+- tapOn: "Sync Relational Deltas"
+- assertVisible: "Handshake & Sync delta completed"
+- tapOn: "OK"
+
+# 3. Asymmetric Note Signing & Packet Tamper Verification
+- tapOn: "🔒 Asymmetric Key Manager"
+- assertVisible: "Generate ECDSA Author Keys"
+- tapOn: "Generate New Keypair"
+- assertVisible: "Keys Saved to Secure Store"
+- tapOn: "Close"
+- tapOn: "📤 Export Notes Packet" # Generates signed shared_notes.json using private key
+- assertVisible: "Export Backup Complete"
+- tapOn: "OK"
+
+# 4. Tamper Protection and Author Verification Failure
+- tapOn: "📥 Import Notes Packet" # Simulates importing a modified/tampered notes packet
+- tapOn: "Select Tampered backup.json"
+- assertVisible: "Author Verification Mismatch: Signature Invalid!"
+- tapOn: "OK"
+
+# 5. True 120 FPS Polish: Scrolling performance checks on Shopify FlashList
+- swipe:
+    direction: DOWN
+    duration: 500
+- assertVisible: "Relational SQLite triggers automate FTS5 indexing."
+- swipe:
+    direction: UP
+    duration: 500
+- assertVisible: "Chapter 1: Relational Deltas"

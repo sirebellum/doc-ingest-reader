@@ -1,6 +1,6 @@
 use parser::{
     BlockType, ExtractedBlock, LLMStructuringOutput, LayoutHint, MockPdfExtractor,
-    PageExtraction, PdfExtractor, parse_pdf, sha2_hash,
+    PageExtraction, PdfExtractor, parse_pdf, sha2_hash, ASTNode,
 };
 
 #[test]
@@ -17,6 +17,7 @@ fn test_serialization_scaffold() {
         overlap_context: "previous context".to_string(),
         raw_text: "Hello Scaffold on Page 1".to_string(),
         layout_hints: vec![hint],
+        extracted_images: vec![],
     };
 
     let serialized = serde_json::to_string(&extraction).unwrap();
@@ -31,7 +32,15 @@ fn test_serialization_scaffold() {
 fn test_block_types_and_llm_outputs() {
     let block = ExtractedBlock {
         block_type: BlockType::Heading,
-        html_content: "<h2>Chapter 1</h2>".to_string(),
+        content: ASTNode::Heading {
+            level: 2,
+            children: vec![ASTNode::Text {
+                text: "Chapter 1".to_string(),
+                bold: None,
+                italic: None,
+                code: None,
+            }],
+        },
         hyperlink_targets: vec!["#ch2".to_string()],
         semantic_tags: vec!["intro".to_string()],
     };
@@ -44,7 +53,18 @@ fn test_block_types_and_llm_outputs() {
     let deserialized: LLMStructuringOutput = serde_json::from_str(&serialized).unwrap();
 
     assert_eq!(deserialized.blocks[0].block_type, BlockType::Heading);
-    assert_eq!(deserialized.blocks[0].html_content, "<h2>Chapter 1</h2>");
+    assert_eq!(
+        deserialized.blocks[0].content,
+        ASTNode::Heading {
+            level: 2,
+            children: vec![ASTNode::Text {
+                text: "Chapter 1".to_string(),
+                bold: None,
+                italic: None,
+                code: None,
+            }],
+        }
+    );
     assert_eq!(deserialized.blocks[0].hyperlink_targets[0], "#ch2");
 }
 
@@ -61,7 +81,7 @@ fn test_pdf_extractor_trait_with_mock() {
 
     let images = extractor.extract_images("sandbox/").unwrap();
     assert_eq!(images.len(), 1);
-    assert_eq!(images[0], "mock_image_1.png");
+    assert_eq!(images[0], "mock_image_synthetic_simulation_stub_1.png");
 }
 
 #[test]

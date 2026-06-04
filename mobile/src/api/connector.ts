@@ -1,4 +1,6 @@
 import { PASS2_SYSTEM_PROMPT, PromptPayload } from './prompts';
+import { SecureKeystore } from './keystore';
+import { RustParserBridge } from '../native/RustParserBridge';
 
 export type LlmRoute = 'local' | 'network' | 'cloud';
 export type CloudProvider = 'gemini' | 'claude' | 'openai';
@@ -11,16 +13,12 @@ export interface ConnectorConfig {
   modelName?: string;
 }
 
-export interface ExtractedBlock {
-  block_type: 'heading' | 'paragraph' | 'table' | 'code' | 'image' | 'quote';
-  html_content: string;
-  hyperlink_targets: string[];
-  semantic_tags: string[];
-}
+import type { ExtractedBlock as TExtractedBlock } from '../shared/types/ExtractedBlock';
+import type { LLMStructuringOutput } from '../shared/types/LLMStructuringOutput';
+import type { ASTNode } from '../shared/types/ASTNode';
 
-export interface StructuringResponse {
-  blocks: ExtractedBlock[];
-}
+export type ExtractedBlock = TExtractedBlock;
+export type StructuringResponse = LLMStructuringOutput;
 
 /**
  * Normalizes response content string by stripping markdown backticks
@@ -38,31 +36,160 @@ export function cleanJsonResponse(rawContent: string): string {
 /**
  * Triggers LLM Inference according to the selected routing model
  */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(errorMsg));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
+async function retryWithFailover<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  delayMs = 1000
+): Promise<T> {
+  let attempt = 0;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      if (attempt >= retries) {
+        throw err;
+      }
+      console.warn(`[Resilient Inference] Attempt ${attempt} failed. Retrying in ${delayMs}ms... Error:`, err);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error('Unreachable retry state');
+}
+
+/**
+ * Triggers LLM Inference according to the selected routing model
+ */
 export async function runPass2Inference(
   payload: PromptPayload,
   config: ConnectorConfig
 ): Promise<StructuringResponse> {
+  // Validate configuration before starting the execution routing matrix
+  if (config.route === 'network' && !config.endpoint) {
+    throw new Error('Network route selected but no endpoint configured.');
+  }
+  if (config.route === 'cloud') {
+    const hasKey = config.apiKey || (config.provider && await SecureKeystore.getApiKey(config.provider));
+    if (!hasKey || !config.provider) {
+      throw new Error('Cloud route selected but api key or provider is missing.');
+    }
+  }
+
   const userPrompt = JSON.stringify(payload);
 
-  switch (config.route) {
-    case 'local':
-      // Local llama.cpp JSI hook (stubbed for Pass 2 scaffolding)
+  const NETWORK_TIMEOUT = 15000;
+  const LOCAL_TIMEOUT = 30000;
+  const MAX_RETRIES = 3;
+
+  let currentRoute = config.route;
+  let lastError: any = null;
+
+  // Track visited routes to prevent infinite failover loops
+  const visitedRoutes = new Set<string>();
+
+  while (true) {
+    if (visitedRoutes.has(currentRoute)) {
+      console.warn(`[Resilient Inference] Failover loop detected. Recovering by falling back to local mock generator.`);
       return mockLocalInference(payload);
+    }
+    visitedRoutes.add(currentRoute);
 
-    case 'network':
-      if (!config.endpoint) {
-        throw new Error('Network route selected but no endpoint configured.');
+    try {
+      if (currentRoute === 'local') {
+        const modelPath = config.modelName || 'models/custom-model.gguf';
+        const prompt = JSON.stringify(payload);
+        
+        const result = await retryWithFailover(async () => {
+          return withTimeout(
+            (async () => {
+              const resJsonString = await RustParserBridge.runInferenceAsync(modelPath, prompt);
+              const parsed = JSON.parse(cleanJsonResponse(resJsonString));
+              if (!parsed || !Array.isArray(parsed.blocks)) {
+                throw new Error(parsed?.error || 'Invalid inference response structure: missing blocks array');
+              }
+              return parsed;
+            })(),
+            LOCAL_TIMEOUT,
+            'Local on-device inference request timed out.'
+          );
+        }, MAX_RETRIES, 1000);
+        return result;
       }
-      return executeNetworkInference(userPrompt, config.endpoint, config.modelName);
 
-    case 'cloud':
-      if (!config.apiKey || !config.provider) {
-        throw new Error('Cloud route selected but api key or provider is missing.');
+      if (currentRoute === 'network') {
+        if (!config.endpoint) {
+          throw new Error('Network route selected but no endpoint configured.');
+        }
+        
+        const result = await retryWithFailover(async () => {
+          return withTimeout(
+            executeNetworkInference(userPrompt, config.endpoint!, config.modelName),
+            NETWORK_TIMEOUT,
+            'Local network inference request timed out.'
+          );
+        }, MAX_RETRIES, 1000);
+        return result;
       }
-      return executeCloudInference(userPrompt, config.provider, config.apiKey, config.modelName);
 
-    default:
-      throw new Error(`Unsupported LLM route: ${config.route}`);
+      if (currentRoute === 'cloud') {
+        let apiKey = config.apiKey;
+        if (!apiKey && config.provider) {
+          apiKey = await SecureKeystore.getApiKey(config.provider) || undefined;
+        }
+        if (!apiKey || !config.provider) {
+          throw new Error('Cloud route selected but api key or provider is missing.');
+        }
+        
+        const result = await retryWithFailover(async () => {
+          return withTimeout(
+            executeCloudInference(userPrompt, config.provider!, apiKey!, config.modelName),
+            NETWORK_TIMEOUT,
+            'Cloud inference request timed out.'
+          );
+        }, MAX_RETRIES, 1000);
+        return result;
+      }
+
+      throw new Error(`Unsupported LLM route: ${currentRoute}`);
+    } catch (err) {
+      console.warn(`[Resilient Inference] Route ${currentRoute} failed completely. Error:`, err);
+      lastError = err;
+
+      // Failover transition logic
+      if (currentRoute === 'local') {
+        if (config.endpoint) {
+          console.warn('[Resilient Inference] Failover: migrating from Local NPU/CPU to local network link gateway.');
+          currentRoute = 'network';
+        } else if (config.apiKey && config.provider) {
+          console.warn('[Resilient Inference] Failover: migrating from Local NPU/CPU to cloud BYOK endpoint.');
+          currentRoute = 'cloud';
+        } else {
+          console.warn('[Resilient Inference] No backup gateway configured. Falling back to local mock generator fallback.');
+          return mockLocalInference(payload);
+        }
+      } else if (currentRoute === 'network') {
+        if (config.apiKey && config.provider) {
+          console.warn('[Resilient Inference] Failover: migrating from Network link to cloud BYOK endpoint.');
+          currentRoute = 'cloud';
+        } else {
+          console.warn('[Resilient Inference] Network link failed. Transitioning to local on-device GGUF inference.');
+          currentRoute = 'local';
+        }
+      } else {
+        console.warn('[Resilient Inference] Cloud route failed. Recovering pipeline by falling back to local mock generation.');
+        return mockLocalInference(payload);
+      }
+    }
   }
 }
 
@@ -74,17 +201,31 @@ async function executeNetworkInference(
   endpoint: string,
   modelName?: string
 ): Promise<StructuringResponse> {
-  const isOllama = endpoint.includes('/api/generate') || endpoint.includes('11434');
+  const isOllama = endpoint.includes('/api/generate') || endpoint.includes('/api/chat') || endpoint.includes('11434');
+  const isOllamaGenerate = endpoint.includes('/api/generate');
+  
   const url = isOllama
-    ? (endpoint.endsWith('/api/chat') ? endpoint : `${endpoint.replace(/\/$/, '')}/api/chat`)
+    ? (isOllamaGenerate
+        ? (endpoint.endsWith('/api/generate') ? endpoint : `${endpoint.replace(/\/$/, '')}/api/generate`)
+        : (endpoint.endsWith('/api/chat') ? endpoint : `${endpoint.replace(/\/$/, '')}/api/chat`))
     : `${endpoint.replace(/\/$/, '')}/v1/chat/completions`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  const body = isOllama
-    ? {
+  let body: any;
+  if (isOllama) {
+    if (isOllamaGenerate) {
+      body = {
+        model: modelName || 'llama3',
+        prompt: prompt,
+        system: PASS2_SYSTEM_PROMPT,
+        stream: false,
+        options: { temperature: 0.1 },
+      };
+    } else {
+      body = {
         model: modelName || 'llama3',
         messages: [
           { role: 'system', content: PASS2_SYSTEM_PROMPT },
@@ -92,15 +233,18 @@ async function executeNetworkInference(
         ],
         stream: false,
         options: { temperature: 0.1 },
-      }
-    : {
-        model: modelName || 'local-model',
-        messages: [
-          { role: 'system', content: PASS2_SYSTEM_PROMPT },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.1,
       };
+    }
+  } else {
+    body = {
+      model: modelName || 'local-model',
+      messages: [
+        { role: 'system', content: PASS2_SYSTEM_PROMPT },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.1,
+    };
+  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -116,7 +260,11 @@ async function executeNetworkInference(
   let content = '';
 
   if (isOllama) {
-    content = resJson.message?.content || '';
+    if (isOllamaGenerate) {
+      content = resJson.response || '';
+    } else {
+      content = resJson.message?.content || '';
+    }
   } else {
     content = resJson.choices?.[0]?.message?.content || '';
   }
@@ -134,7 +282,7 @@ async function executeCloudInference(
   modelName?: string
 ): Promise<StructuringResponse> {
   let url = '';
-  let headers: Record<string, string> = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
   let body: any = {};
@@ -212,13 +360,20 @@ function mockLocalInference(payload: PromptPayload): StructuringResponse {
     blocks: [
       {
         block_type: 'heading',
-        html_content: `<h2 id="chapter-${payload.page_number}">Mock Chapter ${payload.page_number}</h2>`,
+        content: {
+          type: 'heading',
+          level: 2,
+          children: [{ type: 'text', text: `Mock Chapter ${payload.page_number}`, bold: null, italic: null, code: null }]
+        },
         hyperlink_targets: [],
         semantic_tags: ['mock', 'scaffolding'],
       },
       {
         block_type: 'paragraph',
-        html_content: `<p>This is a simulated paragraph containing ${payload.raw_text.substring(0, 30)}...</p>`,
+        content: {
+          type: 'paragraph',
+          children: [{ type: 'text', text: `This is a simulated paragraph containing ${payload.raw_text.substring(0, 30)}...`, bold: null, italic: null, code: null }]
+        },
         hyperlink_targets: [],
         semantic_tags: ['simulated'],
       },

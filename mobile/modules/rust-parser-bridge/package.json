@@ -1,0 +1,10 @@
+{
+  "name": "rust-parser-bridge",
+  "version": "1.0.0",
+  "description": "High-performance Rust/C++ JSI parser bridge for Expo",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

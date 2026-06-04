@@ -1,0 +1,41 @@
+appId: com.llmpdfingest.mobile
+---
+# 1. Launch App and Verify Library Outlines
+- launchApp
+- assertVisible: "Library Outline"
+- assertVisible: "SQLite Ingestion Engines"
+- assertVisible: "Local LLM Architecture"
+
+# 2. Upload and Ingest a Document
+- tapOn: "➕ Upload PDF Document"
+- assertVisible: "Choose PDF to Upload"
+- tapOn: "SQLite Advanced Ingestion"
+- assertVisible: "Document Upload Ingestion"
+- tapOn: "Local Inference (llama.cpp)"
+- assertVisible: "Ingestion Successful!"
+- tapOn: "OK"
+
+# 3. Read Ingested Chapters and Add Annotations
+- assertVisible: "Ch 1: Ingested Outline"
+- tapOn: "Standard API cloud connector structured block contents."
+- assertVisible: "Note Editor"
+- tapOn: "hsl(48, 100%, 65%)" # Select yellow highlight
+- inputText: "Core cloud architecture validation."
+- tapOn: "Save"
+
+# 4. Export Note Packet Backup to Native Share Sheets
+- tapOn: "📤 Export Notes Packet"
+- assertVisible: "Export Backup Complete"
+- tapOn: "OK"
+
+# 5. Import Note Packet with Edition Hash Mismatch (Fuzzy Re-anchoring)
+- tapOn: "📥 Import Notes Packet"
+- assertVisible: "Import Backups Completed"
+- tapOn: "OK"
+
+# 6. Manual Orphan Notes Relocation Workflow
+- tapOn: "📍 Re-anchor"
+- assertVisible: "Relocation Mode"
+- tapOn: "Standard API cloud connector structured block contents."
+- assertVisible: "Re-anchored Notes"
+- tapOn: "OK"

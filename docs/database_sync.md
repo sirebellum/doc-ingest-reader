@@ -84,3 +84,17 @@ When sharing and importing note backup files (`shared_notes.json`):
    - The database lets them co-exist to support social reading, comments, and collaborative notes.
    - The React Native frontend dynamically and visually merges identical bounds in the reader view so the UI remains uncluttered, while allowing the user to tap and see comments from all authors.
 3. **SHA-256 Identification**: Validates the imported document signature. If the signature matches, annotations overlay instantly. If the signature differs but the metadata aligns (e.g. title/author match), the engine initiates the fuzzy character re-anchoring routines.
+
+---
+
+## 5. Change Log & Addendums
+
+### [v1.5.0] - 2026-05-28
+- **Phase 12: Native similarity & Hybrid Search Ranker**: Introduced high-performance dense 32-bit float array embedding caching via `vector_cache` database table storing Float32Array arrays as raw SQLite `BLOB` fields (cascaded by block deletions). Extended `RustParserBridge` C++ JSI bindings to support synchronous cosine vector similarity calculations (`computeSimilarity` and `computeBatchSimilarities`) with compiler-optimized float operations and robust Pure-JS fallbacks. Overhauled `searchHybrid` to rank and merge keyword BM25 retrieval with semantic vector candidates utilizing standard Reciprocal Rank Fusion (RRF) math.
+
+### [v1.8.0] - 2026-06-03
+- **Drizzle ORM Relational Migration**: Managed local SQLite schema lifecycle via Drizzle ORM schemas in `mobile/src/database/schema.ts`. Generated deterministic migrations located in `mobile/drizzle/` and ran them synchronously at startup.
+- **AST-Aware SQLite Search Triggers**: Replaced raw string triggers with intelligent SQLite triggers that check if `blocks.content` is valid JSON using `json_valid`. If valid JSON, a custom extraction expression uses a `json_tree` SELECT subquery targeting text-heavy AST keys (`text`, `code`, `alt`, `caption`) to aggregate plain text for the `blocks_fts` table, preventing tag indexing pollution without duplicating columns. Raw strings from legacy pipelines automatically fallback to raw value ingestion.
+
+### [v1.9.0] - 2026-06-04
+- **Web SQLite Dynamic Gateway Loading & Verification**: Replaced the hardcoded React Native Web mock database in `schema.ts` with a dynamic `sql.js` WASM engine. When running on the web platform, the engine fetches the active database from the local server gateway (`http://localhost:8080/db`). Configured standard CDN fallback locations to resolve WASM dependencies in browser sandboxes. Exposed connection errors inside the context hooks, preventing fake mock data fallbacks, displaying empty lists, and rendering connection warnings when the gateway is offline.
