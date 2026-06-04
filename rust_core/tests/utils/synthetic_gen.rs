@@ -30,6 +30,8 @@ pub struct SyntheticInput {
     pub title: String,
     pub table_of_contents: Vec<TocItem>,
     pub sections: Vec<SyntheticSection>,
+    #[serde(default)]
+    pub strip_index_from_pdf: bool,
 }
 
 pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Result<()> {
@@ -60,7 +62,7 @@ pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Resu
     current_layer.use_text(&input.title, 10.0, Pt(50.0).into(), Pt(745.0).into(), &font);
 
     // Write Footer Text
-    current_layer.use_text("Page 1", 10.0, Pt(50.0).into(), Pt(40.0).into(), &font_regular);
+    current_layer.use_text("Page 1", 10.0, Pt(40.0).into(), Pt(40.0).into(), &font_regular);
     
     // Footer line
     current_layer.add_line(Line {
@@ -71,12 +73,14 @@ pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Resu
         is_closed: false,
     });
 
-    // Write table of contents
-    current_layer.use_text("Table of Contents", 14.0, Pt(50.0).into(), Pt(700.0).into(), &font);
+    // Write table of contents if not stripped
     let mut y_offset = 680.0;
-    for item in &input.table_of_contents {
-        current_layer.use_text(&item.title, 11.0, Pt(60.0).into(), Pt(y_offset).into(), &font_regular);
-        y_offset -= 18.0;
+    if !input.strip_index_from_pdf {
+        current_layer.use_text("Table of Contents", 14.0, Pt(50.0).into(), Pt(700.0).into(), &font);
+        for item in &input.table_of_contents {
+            current_layer.use_text(&item.title, 11.0, Pt(60.0).into(), Pt(y_offset).into(), &font_regular);
+            y_offset -= 18.0;
+        }
     }
 
     // Draw a section divider line before Chapter heading

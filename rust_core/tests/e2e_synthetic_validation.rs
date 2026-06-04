@@ -223,6 +223,7 @@ fn test_e2e_synthetic_pdf_validation() {
                 ],
             },
         ],
+        strip_index_from_pdf: true,
     };
 
     let pre_pdf_json_path = artifacts_dir.join("synthetic_pre_pdf.json");
@@ -425,12 +426,29 @@ fn test_e2e_synthetic_pdf_validation() {
     let section_count: i64 = conn.query_row("SELECT count(*) FROM sections", [], |row| row.get(0)).unwrap();
     assert!(section_count > 0, "Structural verification failed: no chapters/sections found in database");
     
-    let section_title: String = conn.query_row(
-        "SELECT title FROM sections WHERE id != ? LIMIT 1",
-        params![default_section_id],
-        |row| row.get(0)
-    ).unwrap();
-    assert_eq!(section_title, "Chapter 1: Native Bridges", "Structural boundary matching title failed");
+    // Compare original indexing information (ToC) against the LLM generated indexing (DB sections)
+    let mut section_stmt = conn.prepare("SELECT title FROM sections WHERE id != ? ORDER BY sort_order ASC").unwrap();
+    let db_sections: Vec<String> = section_stmt.query_map(params![default_section_id], |row| {
+        Ok(row.get(0)?)
+    }).unwrap().map(Result::unwrap).collect();
+
+    assert_eq!(
+        db_sections.len(),
+        pre_pdf_input.table_of_contents.len(),
+        "Number of generated sections does not match original indexing information"
+    );
+
+    for (i, db_sec_title) in db_sections.iter().enumerate() {
+        let expected_title = &pre_pdf_input.table_of_contents[i].title;
+        assert_eq!(
+            db_sec_title,
+            expected_title,
+            "Section title mismatch at index {}: expected '{}', found '{}'",
+            i,
+            expected_title,
+            db_sec_title
+        );
+    }
 
     // C. FTS5 Indexing Synchronization
     let mut fts_stmt = conn.prepare("SELECT block_id, content FROM blocks_fts").unwrap();
