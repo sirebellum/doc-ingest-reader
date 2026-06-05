@@ -324,6 +324,27 @@ fn test_e2e_synthetic_pdf_validation() {
         assert!(!block.content.contains(overlap_buffer), "Pass 2 failed to purge overlap context from output blocks");
     }
 
+    // Extensible Metadata Index Extraction (Pass 2 live model metadata check)
+    let index_extractor = delineator::IndexExtractor::new();
+    use delineator::MetadataExtractor;
+    let extracted_meta = index_extractor.extract(&page_extraction_with_overlap, Some("dummy_model_synthetic.gguf"))
+        .expect("IndexExtractor failed to extract metadata on synthetic PDF");
+
+    let doc_index = match extracted_meta {
+        contracts::ExtractedMetadata::Index(ref idx) => idx,
+        _ => panic!("Expected ExtractedMetadata::Index variant"),
+    };
+
+    assert!(!doc_index.items.is_empty(), "Extracted DocumentIndex for synthetic PDF should not be empty");
+    assert_eq!(doc_index.items[0].title, "Chapter 1: Native Bridges");
+    assert_eq!(doc_index.items[0].page_start, 1);
+    assert_eq!(doc_index.items[0].level, 1);
+
+    // Save synthetic index metadata output artifact
+    let index_json_path = artifacts_dir.join("synthetic_index_metadata.json");
+    let serialized_index = serde_json::to_string_pretty(&doc_index).unwrap();
+    fs::write(&index_json_path, &serialized_index).expect("Failed to write synthetic index metadata artifact");
+
     // ==========================================
     // STAGE 4: Database Synchronization & Indexing
     // ==========================================
@@ -368,6 +389,24 @@ fn test_e2e_synthetic_pdf_validation() {
             "INSERT INTO sections (id, document_id, parent_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
             params![section.id, doc_id, section.parent_id, section.title, section.depth_level, section.sort_order],
         ).expect("Failed to insert section");
+    }
+
+    // Insert extracted metadata index items into the sections table
+    let mut index_item_counter = 0;
+    for item in &doc_index.items {
+        index_item_counter += 1;
+        let index_sec_id = format!("sec-metadata-index-{}-{}", doc_id, index_item_counter);
+        tx.execute(
+            "INSERT INTO sections (id, document_id, parent_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                index_sec_id,
+                doc_id,
+                None::<String>,
+                item.title,
+                item.level,
+                item.page_start * 1000 + index_item_counter
+            ],
+        ).expect("Failed to insert metadata index item as section");
     }
 
     for block in &delineated_output.blocks {
@@ -427,7 +466,7 @@ fn test_e2e_synthetic_pdf_validation() {
     assert!(section_count > 0, "Structural verification failed: no chapters/sections found in database");
     
     // Compare original indexing information (ToC) against the LLM generated indexing (DB sections)
-    let mut section_stmt = conn.prepare("SELECT title FROM sections WHERE id != ? ORDER BY sort_order ASC").unwrap();
+    let mut section_stmt = conn.prepare("SELECT title FROM sections WHERE id != ? AND id NOT LIKE 'sec-metadata-index-%' ORDER BY sort_order ASC").unwrap();
     let db_sections: Vec<String> = section_stmt.query_map(params![default_section_id], |row| {
         Ok(row.get(0)?)
     }).unwrap().map(Result::unwrap).collect();
@@ -444,6 +483,30 @@ fn test_e2e_synthetic_pdf_validation() {
             db_sec_title,
             expected_title,
             "Section title mismatch at index {}: expected '{}', found '{}'",
+            i,
+            expected_title,
+            db_sec_title
+        );
+    }
+
+    // Compare extracted index metadata against the original indexing (ToC)
+    let mut metadata_section_stmt = conn.prepare("SELECT title FROM sections WHERE id LIKE 'sec-metadata-index-%' ORDER BY sort_order ASC").unwrap();
+    let db_metadata_sections: Vec<String> = metadata_section_stmt.query_map([], |row| {
+        Ok(row.get(0)?)
+    }).unwrap().map(Result::unwrap).collect();
+
+    assert_eq!(
+        db_metadata_sections.len(),
+        pre_pdf_input.table_of_contents.len(),
+        "Number of generated metadata index sections does not match original indexing information"
+    );
+
+    for (i, db_sec_title) in db_metadata_sections.iter().enumerate() {
+        let expected_title = &pre_pdf_input.table_of_contents[i].title;
+        assert_eq!(
+            db_sec_title,
+            expected_title,
+            "Metadata index title mismatch at index {}: expected '{}', found '{}'",
             i,
             expected_title,
             db_sec_title

@@ -1,6 +1,7 @@
 import { fuzzyReAnchor, AnchorMetadata, SearchableBlock } from '../utils/anchoring';
 import { signPayload, verifyPayload } from '../utils/crypto';
 import { mergeThreeWay, computeLCS } from '../utils/merging';
+import { ENABLE_CORE_DEBUG_LOGS, logDebug } from '../utils/logger';
 
 
 export interface DatabaseAdapter {
@@ -17,8 +18,38 @@ export function createBetterSqlite3Adapter(db: any): DatabaseAdapter {
   return {
     all: (sql, params = []) => db.prepare(sql).all(...params),
     get: (sql, params = []) => db.prepare(sql).get(...params),
-    run: (sql, params = []) => { db.prepare(sql).run(...params); },
-    transaction: (fn) => db.transaction(fn)(),
+    run: (sql, params = []) => {
+      if (ENABLE_CORE_DEBUG_LOGS) {
+        const startTime = Date.now();
+        db.prepare(sql).run(...params);
+        const duration = Date.now() - startTime;
+        logDebug('DATABASE', 'Write', `Executed write query: ${sql}`, `Duration: ${duration}ms, Status: Success`);
+        if (sql.includes('INSERT INTO blocks') || sql.includes('UPDATE blocks')) {
+          logDebug('DATABASE', 'Trigger', 'FTS5 trigger blocks_fts_ai/au firing -> Extracting plain-text from AST content', 'Trigger: blocks_fts_ai/au');
+        }
+      } else {
+        db.prepare(sql).run(...params);
+      }
+    },
+    transaction: (fn) => {
+      if (ENABLE_CORE_DEBUG_LOGS) {
+        logDebug('DATABASE', 'Transaction', 'Opening active transaction hook', 'Status: Begin');
+      }
+      const startTime = Date.now();
+      try {
+        db.transaction(fn)();
+        if (ENABLE_CORE_DEBUG_LOGS) {
+          const duration = Date.now() - startTime;
+          logDebug('DATABASE', 'Transaction', 'Committed database write transaction successfully', `Duration: ${duration}ms, Status: Success`);
+        }
+      } catch (e: any) {
+        if (ENABLE_CORE_DEBUG_LOGS) {
+          const duration = Date.now() - startTime;
+          logDebug('DATABASE', 'Transaction', `Rolled back database write transaction due to error: ${e.message}`, `Duration: ${duration}ms, Status: Rollback`);
+        }
+        throw e;
+      }
+    },
   };
 }
 
@@ -29,8 +60,38 @@ export function createExpoSqliteAdapter(db: any): DatabaseAdapter {
   return {
     all: (sql, params = []) => db.getAllSync(sql, ...params),
     get: (sql, params = []) => db.getFirstSync(sql, ...params) || undefined,
-    run: (sql, params = []) => { db.runSync(sql, ...params); },
-    transaction: (fn) => db.withTransactionSync(fn),
+    run: (sql, params = []) => {
+      if (ENABLE_CORE_DEBUG_LOGS) {
+        const startTime = Date.now();
+        db.runSync(sql, ...params);
+        const duration = Date.now() - startTime;
+        logDebug('DATABASE', 'Write', `Executed write query: ${sql}`, `Duration: ${duration}ms, Status: Success`);
+        if (sql.includes('INSERT INTO blocks') || sql.includes('UPDATE blocks')) {
+          logDebug('DATABASE', 'Trigger', 'FTS5 trigger blocks_fts_ai/au firing -> Extracting plain-text from AST content', 'Trigger: blocks_fts_ai/au');
+        }
+      } else {
+        db.runSync(sql, ...params);
+      }
+    },
+    transaction: (fn) => {
+      if (ENABLE_CORE_DEBUG_LOGS) {
+        logDebug('DATABASE', 'Transaction', 'Opening active transaction hook', 'Status: Begin');
+      }
+      const startTime = Date.now();
+      try {
+        db.withTransactionSync(fn);
+        if (ENABLE_CORE_DEBUG_LOGS) {
+          const duration = Date.now() - startTime;
+          logDebug('DATABASE', 'Transaction', 'Committed database write transaction successfully', `Duration: ${duration}ms, Status: Success`);
+        }
+      } catch (e: any) {
+        if (ENABLE_CORE_DEBUG_LOGS) {
+          const duration = Date.now() - startTime;
+          logDebug('DATABASE', 'Transaction', `Rolled back database write transaction due to error: ${e.message}`, `Duration: ${duration}ms, Status: Rollback`);
+        }
+        throw e;
+      }
+    },
   };
 }
 

@@ -40,7 +40,7 @@ add_dependencies(mobile_build_web mobile_install_deps)
 
 # 3. Target: Start development server
 add_custom_target(start-web-server
-    COMMAND "${NPM_EXE}" run web
+    COMMAND "${NODE_EXE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/start-web-server.js"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Starting Expo React Native Metro and Web development server..."
     USES_TERMINAL

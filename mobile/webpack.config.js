@@ -41,6 +41,14 @@ module.exports = async function (env, argv) {
     resourceRegExp: /[\\/]__mocks__[\\/]/ 
   }));
 
+  // Inject process.env.ENABLE_CORE_DEBUG_LOGS
+  const enableCoreDebugLogs = process.env.ENABLE_CORE_DEBUG_LOGS === 'true';
+  config.plugins.push(
+    new webpack.DefinePlugin({
+      'process.env.ENABLE_CORE_DEBUG_LOGS': JSON.stringify(enableCoreDebugLogs ? 'true' : 'false'),
+    })
+  );
+
   // Also exclude these folders from Babel loader processing
   if (config.module && config.module.rules) {
     config.module.rules.forEach(rule => {

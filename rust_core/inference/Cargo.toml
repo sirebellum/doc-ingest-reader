@@ -17,5 +17,6 @@ sha2 = "0.10"
 
 [features]
 llama_native = ["dep:llama-cpp-sys-2"]
+verbose-logging = ["contracts/verbose-logging"]
 
 

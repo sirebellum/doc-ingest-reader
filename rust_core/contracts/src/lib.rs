@@ -157,10 +157,57 @@ pub struct MultiFormatExtraction {
     pub extracted_images: Vec<ExtractedImageMetadata>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../../mobile/src/shared/types/DocumentIndexItem.ts")]
+pub struct DocumentIndexItem {
+    pub title: String,
+    pub page_start: u32,
+    pub level: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../../mobile/src/shared/types/DocumentIndex.ts")]
+pub struct DocumentIndex {
+    pub items: Vec<DocumentIndexItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractedMetadata.ts")]
+pub enum ExtractedMetadata {
+    Index(DocumentIndex),
+    Tags(Vec<String>),
+    Summary(String),
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn test_export() {
         // Handled automatically by #[ts(export, export_to = "...")]
     }
+}
+
+#[macro_export]
+macro_rules! log_debug {
+    ($subsystem:expr, $module:expr, $msg:expr) => {
+        #[cfg(feature = "verbose-logging")]
+        {
+            let epoch_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            println!("[DEBUG][{}][{}::{}] -> {}", epoch_ms, $subsystem, $module, $msg);
+        }
+    };
+    ($subsystem:expr, $module:expr, $msg:expr, $metrics:expr) => {
+        #[cfg(feature = "verbose-logging")]
+        {
+            let epoch_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            println!("[DEBUG][{}][{}::{}] -> {} | {}", epoch_ms, $subsystem, $module, $msg, $metrics);
+        }
+    };
 }

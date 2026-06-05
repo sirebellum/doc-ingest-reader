@@ -343,11 +343,45 @@ fn test_downloader_and_ingestion_pipeline() {
         params![doc_id, corpus_uuid, "Research Notes", "Novice", "pdf", sha2_hash(pdf_path), pdf_path],
     ).expect("Failed to insert document");
 
+    // Extensible Metadata Index Extraction (Pass 2 live model metadata check)
+    let index_extractor = delineator::IndexExtractor::new();
+    use delineator::MetadataExtractor;
+    let extracted_meta = index_extractor.extract(&simulated_extraction, Some("dummy_model_e2e.gguf"))
+        .expect("IndexExtractor failed to extract metadata");
+
+    let doc_index = match extracted_meta {
+        contracts::ExtractedMetadata::Index(idx) => idx,
+        _ => panic!("Expected ExtractedMetadata::Index variant"),
+    };
+
+    assert!(!doc_index.items.is_empty(), "Extracted DocumentIndex should not be empty");
+    assert_eq!(doc_index.items[0].title, "Chapter 1: Research Notes");
+    assert_eq!(doc_index.items[0].page_start, 1);
+    assert_eq!(doc_index.items[0].level, 1);
+
     for section in &synthesized_extraction.sections {
         tx.execute(
             "INSERT INTO sections (id, document_id, parent_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
             params![section.id, doc_id, section.parent_id, section.title, section.depth_level, section.sort_order],
         ).expect("Failed to insert section");
+    }
+
+    // Insert extracted metadata index items into the sections table
+    let mut index_item_counter = 0;
+    for item in &doc_index.items {
+        index_item_counter += 1;
+        let index_sec_id = format!("sec-metadata-index-{}-{}", doc_id, index_item_counter);
+        tx.execute(
+            "INSERT INTO sections (id, document_id, parent_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                index_sec_id,
+                doc_id,
+                None::<String>,
+                item.title,
+                item.level,
+                item.page_start * 1000 + index_item_counter
+            ],
+        ).expect("Failed to insert metadata index item as section");
     }
 
     for block in &synthesized_extraction.blocks {

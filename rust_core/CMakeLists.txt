@@ -78,19 +78,19 @@ elseif (BUILD_IOS_FRAMEWORK)
     )
 endif()
 
-# Configure optional features like llama_native
-set(CARGO_FEATURE_FLAGS "")
+# Configure optional features like llama_native and verbose-logging
+set(RUST_FEATURES "")
 if (LLAMA_NATIVE)
-    set(CARGO_FEATURE_FLAGS "--features" "llama_native")
-    # If llama target is available from FetchContent build of llama.cpp
-    if (TARGET llama)
-        set(LLAMA_LIB_DIR "$<TARGET_FILE_DIR:llama>")
-        if (CARGO_ENV_VARS)
-            list(APPEND CARGO_ENV_VARS "LLAMA_LIB_PATH=${LLAMA_LIB_DIR}")
-        else()
-            set(CARGO_ENV_VARS ${CMAKE_COMMAND} -E env "LLAMA_LIB_PATH=${LLAMA_LIB_DIR}")
-        endif()
-    endif()
+    list(APPEND RUST_FEATURES "llama_native")
+endif()
+if (ENABLE_CORE_DEBUG_LOGS)
+    list(APPEND RUST_FEATURES "verbose-logging")
+endif()
+
+set(CARGO_FEATURE_FLAGS "")
+if (RUST_FEATURES)
+    string(REPLACE ";" "," RUST_FEATURES_STR "${RUST_FEATURES}")
+    set(CARGO_FEATURE_FLAGS "--features" "${RUST_FEATURES_STR}")
 endif()
 
 # Define Cargo Build Command Template
@@ -132,7 +132,7 @@ endif()
 
 # Target: Desktop Server (Host application)
 add_custom_target(desktop-server
-    COMMAND ${CARGO_EXE} build -p desktop_server
+    COMMAND ${CARGO_EXE} build -p desktop_server ${CARGO_FEATURE_FLAGS}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Compiling Host Desktop Server..."
     VERBATIM
@@ -140,7 +140,7 @@ add_custom_target(desktop-server
 
 # Target: Start Desktop Server (runs it)
 add_custom_target(start-desktop-server
-    COMMAND ${CARGO_EXE} run -p desktop_server -- --db "${CMAKE_CURRENT_SOURCE_DIR}/parser/target/test_artifacts/test_corpus.db"
+    COMMAND ${CARGO_EXE} run -p desktop_server ${CARGO_FEATURE_FLAGS} -- --db "${CMAKE_CURRENT_SOURCE_DIR}/parser/target/test_artifacts/test_corpus.db"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Starting Host Desktop Server..."
     USES_TERMINAL
@@ -151,18 +151,18 @@ add_custom_target(start-desktop-server
 if (RUN_INTEGRATION_TESTS)
     add_test(
         NAME CargoTests
-        COMMAND "${CARGO_EXE}" test --workspace
+        COMMAND "${CARGO_EXE}" test --workspace ${CARGO_FEATURE_FLAGS}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     # Specific integration validation tests mapping
     add_test(
         NAME SyntheticValidationTest
-        COMMAND "${CARGO_EXE}" test --test e2e_synthetic_validation
+        COMMAND "${CARGO_EXE}" test --test e2e_synthetic_validation ${CARGO_FEATURE_FLAGS}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     add_test(
         NAME IngestionIntegrationTest
-        COMMAND "${CARGO_EXE}" test --test e2e_integration_test
+        COMMAND "${CARGO_EXE}" test --test e2e_integration_test ${CARGO_FEATURE_FLAGS}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()

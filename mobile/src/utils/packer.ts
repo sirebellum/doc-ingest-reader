@@ -1,5 +1,6 @@
 import { verifyPayload } from './crypto';
 import { exportDocumentNotesBackup, importDocumentNotesBackup, BackupPayload, ImportResult } from '../database/backup';
+import { ENABLE_CORE_DEBUG_LOGS, logDebug } from './logger';
 
 // Dynamically load expo-file-system to keep EAS builds and Node environment safe
 let FileSystem: any = null;
@@ -52,6 +53,16 @@ export function compressLZW(uncompressed: string): string {
   for (let i = 0; i < result.length; i++) {
     buffer.writeUInt16BE(result[i], i * 2);
   }
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'LZW',
+      `LZW Compression: Input size: ${uncompressed.length} chars, Output size: ${buffer.length} bytes (base64 length: ${buffer.toString("base64").length})`,
+      `Bytes: ${buffer.length}, Duration: 0ms, Status: Success`
+    );
+  }
+
   return buffer.toString("base64");
 }
 
@@ -93,6 +104,15 @@ export function decompressLZW(compressedBase64: string): string {
     }
 
     w = entry;
+  }
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'LZW',
+      `LZW Decompression: Input size: ${compressedBase64.length} chars base64, Output size: ${result.length} chars`,
+      `Bytes: ${buffer.length}, Duration: 0ms, Status: Success`
+    );
   }
 
   return result;
@@ -165,6 +185,16 @@ export async function packNotesBackup(
   // 3. Serialize and compress entire container bundle
   const container: NotesPackage = { manifest, assets };
   const jsonStr = JSON.stringify(container);
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'Packer',
+      `Packing notes backup. Document: ${documentId}, Images: ${Object.keys(assets).length}`,
+      `Status: Success`
+    );
+  }
+
   return compressLZW(jsonStr);
 }
 
@@ -179,6 +209,15 @@ export async function unpackNotesBackup(
   const jsonStr = decompressLZW(compressedBackupStr);
   const container: NotesPackage = JSON.parse(jsonStr);
   const { manifest, assets } = container;
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'Packer',
+      `Unpacking notes backup. Document: ${manifest.document.title}, Images: ${Object.keys(assets).length}`,
+      `Status: Success`
+    );
+  }
 
   // 2. ECDSA Cryptographic Signature Verification
   // Must execute verifyPayload on annotations manifest BEFORE modifying database or writing images

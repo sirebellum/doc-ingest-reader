@@ -83,5 +83,8 @@ Pass 2 prompts are strictly versioned, tracked, and tested to ensure they do not
 ### [v1.7.0] - 2026-06-04
 - **End-to-End LLM Ingestion Pipeline & Model Downloader Integration Test**: Added a comprehensive integration test suite `e2e_llm_ingestion.rs` under `rust_core/parser/tests/`. The suite verifies model downloading resiliency, sandbox validation, range-header resume operations, post-download checksum validations, layout extraction, overlap context purging, SQLite serialization, and FTS5 synchronization.
 
+### [v1.8.0] - 2026-06-04
+- **Modular Metadata Extractor Trait & Table of Contents Parsing**: Defined the core `MetadataExtractor` trait in `rust_core/delineator` to sequentially process layout data without cross-contamination. Implemented `IndexExtractor` as its canonical implementation to extract document index items (chapters, section mappings) by querying local model weights. Enabled runtime download of targeted GGUF models (`unsloth/gemma-4-E2B-it-GGUF` at `UD_IQ2_M`) via FFI bindings linked to `ModelDownloader`, guaranteeing full model presence prior to boot sequences.
+
 
 

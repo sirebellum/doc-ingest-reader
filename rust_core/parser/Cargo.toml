@@ -17,6 +17,9 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 contracts = { path = "../contracts" }
 delineator = { path = "../delineator" }
 
+[features]
+verbose-logging = ["contracts/verbose-logging", "delineator/verbose-logging"]
+
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 uuid = { version = "1.8", features = ["v4"] }

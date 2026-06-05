@@ -55,3 +55,8 @@ if (RUST_INFERENCE_LIB)
 else()
     message(WARNING "Rust inference static library not found at: ${RUST_LIBS_DIR}")
 endif()
+
+if (DEFINED ENV{ENABLE_CORE_DEBUG_LOGS} AND "$ENV{ENABLE_CORE_DEBUG_LOGS}" STREQUAL "true")
+    target_compile_definitions(RustParserBridge PRIVATE ENABLE_CORE_DEBUG_LOGS=1)
+    message(STATUS "Android JSI Bridge: ENABLE_CORE_DEBUG_LOGS compile-time macro is active")
+endif()

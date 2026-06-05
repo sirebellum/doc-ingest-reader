@@ -10,12 +10,14 @@ option(BUILD_ANDROID_APK "Build Android APK cross-compilation target" OFF)
 option(BUILD_IOS_FRAMEWORK "Build iOS Framework cross-compilation target" OFF)
 option(RUN_INTEGRATION_TESTS "Run automated integration and synthetic validation suites" ON)
 option(LLAMA_NATIVE "Enable native llama.cpp integration" OFF)
+option(ENABLE_CORE_DEBUG_LOGS "Enable compile-time gated debug logs across all subsystems" OFF)
 
 message(STATUS "LLMPDFIngest Configuration:")
 message(STATUS "  - BUILD_ANDROID_APK:   ${BUILD_ANDROID_APK}")
 message(STATUS "  - BUILD_IOS_FRAMEWORK: ${BUILD_IOS_FRAMEWORK}")
 message(STATUS "  - RUN_INTEGRATION_TESTS: ${RUN_INTEGRATION_TESTS}")
 message(STATUS "  - LLAMA_NATIVE:        ${LLAMA_NATIVE}")
+message(STATUS "  - ENABLE_CORE_DEBUG_LOGS: ${ENABLE_CORE_DEBUG_LOGS}")
 
 # 2. Fetch and compile llama.cpp if enabled
 if (LLAMA_NATIVE)

@@ -180,10 +180,23 @@ impl PdfExtractor for RealPdfExtractor {
                 let char_str = c.unicode_string().unwrap_or_default();
                 let font_size = c.text_object().map(|obj| obj.unscaled_font_size().value).unwrap_or(10.0);
                 
+                contracts::log_debug!(
+                    "PASS_1",
+                    "Parser",
+                    format!("Geometric coordinate mapping -> Char: '{}'", char_str),
+                    format!("BBox: [{}, {}, {}, {}], FontSize: {}pt, Status: Success", rect[0], rect[1], rect[2], rect[3], font_size)
+                );
+                
                 // Simple word/token segmentation based on whitespace characters
                 if char_str.trim().is_empty() {
                     if !current_snippet.is_empty() {
                         if let Some(bbox) = current_bbox {
+                            contracts::log_debug!(
+                                "PASS_1",
+                                "Parser",
+                                format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
+                                format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
+                            );
                             segments.push(LayoutHint {
                                 bounding_box: bbox,
                                 font_size: current_font_size,
@@ -212,6 +225,12 @@ impl PdfExtractor for RealPdfExtractor {
         // Push remaining trailing snippet
         if !current_snippet.is_empty() {
             if let Some(bbox) = current_bbox {
+                contracts::log_debug!(
+                    "PASS_1",
+                    "Parser",
+                    format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
+                    format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
+                );
                 segments.push(LayoutHint {
                     bounding_box: bbox,
                     font_size: current_font_size,
@@ -360,6 +379,12 @@ impl PdfExtractor for RealPdfExtractor {
                             let final_path = output_dir.join(&final_filename);
                             if fs::rename(&temp_path, &final_path).is_ok() {
                                 saved_successfully = true;
+                                contracts::log_debug!(
+                                    "PASS_1",
+                                    "Parser",
+                                    format!("Saved extracted sandboxed image to storage path: {}", final_path.display()),
+                                    format!("ImageID: {}, Hash: {}, Status: Success", image_id, hash)
+                                );
                             }
                         }
                         let _ = fs::remove_file(&temp_path);
@@ -383,6 +408,12 @@ impl PdfExtractor for RealPdfExtractor {
                                         if let Ok(mut file) = File::create(&final_path) {
                                             if file.write_all(&raw_data).is_ok() {
                                                 saved_successfully = true;
+                                                contracts::log_debug!(
+                                                    "PASS_1",
+                                                    "Parser",
+                                                    format!("Saved extracted sandboxed image (fallback lopdf) to storage path: {}", final_path.display()),
+                                                    format!("ImageID: {}, Hash: {}, Status: Success", image_id, hash)
+                                                );
                                                 break;
                                             }
                                         }
@@ -403,6 +434,12 @@ impl PdfExtractor for RealPdfExtractor {
                     let final_path = output_dir.join(&final_filename);
                     if let Ok(mut file) = File::create(&final_path) {
                         let _ = file.write_all(b"PNG_BINARY_DATA_FALLBACK");
+                        contracts::log_debug!(
+                            "PASS_1",
+                            "Parser",
+                            format!("Saved absolute fallback image data to storage path: {}", final_path.display()),
+                            format!("ImageID: {}, Hash: {}, Status: Fallback", image_id, hash)
+                        );
                     }
                 }
                 
@@ -452,6 +489,15 @@ impl PdfExtractor for RealPdfExtractor {
         if final_raw_text.len() > max_raw_text_len {
             final_raw_text.truncate(max_raw_text_len);
         }
+
+        #[cfg(feature = "verbose-logging")]
+        let token_stream_words = final_raw_text.split_whitespace().count();
+        contracts::log_debug!(
+            "PASS_1",
+            "Parser",
+            "Completed layout-corrected text stream construction",
+            format!("Bytes: {}, Words: {}, Status: Success", final_raw_text.len(), token_stream_words)
+        );
 
         Ok(PageExtraction {
             document_id: self.document_id.clone(),

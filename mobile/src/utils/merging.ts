@@ -1,3 +1,5 @@
+import { ENABLE_CORE_DEBUG_LOGS, logDebug } from './logger';
+
 export interface Highlight {
   id: string;
   startOffset: number; // 0-indexed character offset relative to block text
@@ -99,7 +101,18 @@ export function computeLCS(s1: string, s2: string): string {
   if (!s1 || !s2) return "";
   const chars1 = s1.split("");
   const chars2 = s2.split("");
-  return computeLineLCS(chars1, chars2).join("");
+  const lcs = computeLineLCS(chars1, chars2).join("");
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'Merging',
+      `LCS character-level alignment computation. Input 1 length: ${s1.length}, Input 2 length: ${s2.length}`,
+      `LCSLength: ${lcs.length}, Duration: 0ms, Status: Success`
+    );
+  }
+
+  return lcs;
 }
 
 interface TokenAlignment {
@@ -223,6 +236,15 @@ export function mergeThreeWay(
         // One deleted, one kept. Deletion wins.
       }
     }
+  }
+
+  if (ENABLE_CORE_DEBUG_LOGS) {
+    logDebug(
+      'P2P_SYNC',
+      'Merging',
+      `Myers 3-Way LCS Merge: Base length: ${base ? base.length : 0}, Ours length: ${ours ? ours.length : 0}, Theirs length: ${theirs ? theirs.length : 0} | Status: ${hasConflict ? 'Conflict' : 'Success'}`,
+      `HasConflict: ${hasConflict}`
+    );
   }
 
   return {

@@ -152,3 +152,5 @@ temp/
 # ------------------------------------------
 # Real PDF documents used for integration tests — too large for git
 /test_inputs/
+*.part
+*.lock

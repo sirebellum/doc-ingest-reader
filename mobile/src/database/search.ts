@@ -1,6 +1,7 @@
 import { getDatabaseAdapter } from './backup';
 import { generateEmbedding } from '../utils/embeddings';
 import { RustParserBridge } from '../native/RustParserBridge';
+import { ENABLE_CORE_DEBUG_LOGS, logDebug } from '../utils/logger';
 
 export interface HybridSearchResult {
   id: string;
@@ -178,6 +179,15 @@ export function searchHybrid(
     }
     if (sRank !== undefined) {
       combinedScore += 1 / (60 + sRank);
+    }
+
+    if (ENABLE_CORE_DEBUG_LOGS) {
+      logDebug(
+        'SEARCH',
+        'HybridRanker',
+        `Reciprocal Rank Fusion (RRF) query score calculated for block. ID: ${id}`,
+        `KeywordRank: ${kRank !== undefined ? kRank : 'N/A'}, SemanticRank: ${sRank !== undefined ? sRank : 'N/A'}, RRFScore: ${combinedScore.toFixed(6)}, Status: Success`
+      );
     }
 
     combinedResults.push({

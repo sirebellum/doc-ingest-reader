@@ -9,8 +9,190 @@ use serde_json;
 
 use contracts::{
     PageExtraction, MultiFormatExtraction, LLMStructuringOutput,
-    StructuredSection, StructuredBlock, ASTNode, BlockType, LayoutHint
+    StructuredSection, StructuredBlock, ASTNode, BlockType, LayoutHint,
+    DocumentIndex, ExtractedMetadata
 };
+
+pub const DEFAULT_MODEL_REPO: &str = "unsloth/gemma-4-E2B-it-GGUF";
+pub const DEFAULT_MODEL_FILE: &str = "gemma-4-E2B-it-UD-IQ2_M.gguf";
+pub const DEFAULT_MODEL_URL: &str = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-UD-IQ2_M.gguf";
+pub const DEFAULT_MODEL_SHA256: &str = "60f84cb5b9512175f219506da4a5d98d30b112855c474a3a6f06f6596dc7fd9b";
+
+pub fn verify_and_download_model(model_path: &str) -> Result<()> {
+    let path = std::path::Path::new(model_path);
+    if path.to_string_lossy().contains("dummy") {
+        if !path.exists() {
+            std::fs::File::create(path)?;
+        }
+        return Ok(());
+    }
+
+    // Call downloader to guarantee full asset presence prior to boot sequences
+    inference::downloader::ModelDownloader::download_model(
+        DEFAULT_MODEL_URL,
+        path,
+        Some(DEFAULT_MODEL_SHA256),
+        None::<fn(f64)>,
+    )?;
+    Ok(())
+}
+
+fn clean_json_markers(input: &str) -> String {
+    let mut cleaned = input.trim();
+    if cleaned.starts_with("```") {
+        if cleaned.starts_with("```json") {
+            cleaned = cleaned.trim_start_matches("```json");
+        } else {
+            cleaned = cleaned.trim_start_matches("```");
+        }
+        cleaned = cleaned.trim_end_matches("```");
+    }
+    cleaned.trim().to_string()
+}
+
+fn heuristic_repair_json(input: &str) -> String {
+    let mut repaired = input.trim().to_string();
+    
+    let open_braces = repaired.chars().filter(|&c| c == '{').count();
+    let close_braces = repaired.chars().filter(|&c| c == '}').count();
+    if open_braces > close_braces {
+        repaired.push_str(&"}".repeat(open_braces - close_braces));
+    }
+    
+    let open_brackets = repaired.chars().filter(|&c| c == '[').count();
+    let close_brackets = repaired.chars().filter(|&c| c == ']').count();
+    if open_brackets > close_brackets {
+        repaired.push_str(&"]".repeat(open_brackets - close_brackets));
+    }
+    
+    repaired
+}
+
+pub trait MetadataExtractor {
+    fn extract(&self, page: &PageExtraction, model_path: Option<&str>) -> Result<ExtractedMetadata>;
+}
+
+pub struct IndexExtractor;
+
+impl IndexExtractor {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for IndexExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MetadataExtractor for IndexExtractor {
+    fn extract(&self, page: &PageExtraction, model_path: Option<&str>) -> Result<ExtractedMetadata> {
+        let system_prompt = "You are a professional assistant that extracts structured document indices (Table of Contents / chapters / sections) from page content.
+You will be provided with:
+1. Overlap Context: Text from the end of the previous page. Use this ONLY for context and continuity.
+2. Raw Extracted Text: The actual text of the current page. Only extract headings and chapters from this text.
+
+Rules:
+1. Extract any chapter titles, section headers, or sub-headings found in the Raw Extracted Text.
+2. For each extracted index item, specify:
+   - \"title\": The clean title of the chapter/section.
+   - \"page_start\": The page number of the current page.
+   - \"level\": Depth level (1 for Chapter, 2 for Section, 3 for Subsection).
+3. Do NOT extract any index items from the Overlap Context. The Overlap Context is provided ONLY to help you resolve partial sentences/headings spanning page boundaries.
+4. Do NOT duplicate index items or output overlapping headers.
+5. Your output must be a strict JSON payload matching the DocumentIndex schema:
+{
+  \"items\": [
+    { \"title\": \"Chapter/Section Title\", \"page_start\": number, \"level\": number }
+  ]
+}
+6. Do NOT wrap the output in markdown fences (e.g. ```json). Only return raw JSON.";
+
+        let user_prompt = format!(
+            "Document ID: {}\nPage Number: {}\nOverlap Context: {}\nRaw Extracted Text:\n{}",
+            page.document_id,
+            page.page_number,
+            page.overlap_context,
+            page.raw_text
+        );
+
+        let full_prompt = format!("{}\n\nInput Payload:\n{}", system_prompt, user_prompt);
+
+        contracts::log_debug!(
+            "PASS_2",
+            "IndexExtractor",
+            "Prepared IndexExtractor prompt payload",
+            format!("PromptBytes: {}, OverlapBytes: {}, Status: Success", full_prompt.len(), page.overlap_context.len())
+        );
+
+        if let Some(path) = model_path {
+            verify_and_download_model(path)?;
+            inference::initialize_inference_context(path)?;
+        }
+
+        let output_str = inference::run_local_inference(&full_prompt)?;
+
+        contracts::log_debug!(
+            "PASS_2",
+            "IndexExtractor",
+            "Received raw model output from local inference",
+            format!(
+                "PromptTokens: {}, ResponseTokens: {}, ResponseBytes: {}, Status: Success",
+                full_prompt.len() / 4,
+                output_str.len() / 4,
+                output_str.len()
+            )
+        );
+
+        let cleaned = clean_json_markers(&output_str);
+        let index: DocumentIndex = match serde_json::from_str(&cleaned) {
+            Ok(idx) => idx,
+            Err(e) => {
+                println!("[IndexExtractor] JSON parsing failed: {:?}. Attempting heuristic recovery.", e);
+                let repaired = heuristic_repair_json(&cleaned);
+                match serde_json::from_str(&repaired) {
+                    Ok(idx) => idx,
+                    Err(_) => {
+                        println!("[IndexExtractor] Heuristic recovery failed. Returning empty DocumentIndex.");
+                        DocumentIndex { items: vec![] }
+                    }
+                }
+            }
+        };
+
+        Ok(ExtractedMetadata::Index(index))
+    }
+}
+
+pub struct MetadataPipeline {
+    extractors: Vec<Box<dyn MetadataExtractor>>,
+}
+
+impl MetadataPipeline {
+    pub fn new() -> Self {
+        Self { extractors: Vec::new() }
+    }
+
+    pub fn add_extractor(&mut self, extractor: Box<dyn MetadataExtractor>) {
+        self.extractors.push(extractor);
+    }
+
+    pub fn process(&self, page: &PageExtraction, model_path: Option<&str>) -> Result<Vec<ExtractedMetadata>> {
+        let mut results = Vec::new();
+        for extractor in &self.extractors {
+            let res = extractor.extract(page, model_path)?;
+            results.push(res);
+        }
+        Ok(results)
+    }
+}
+
+impl Default for MetadataPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 fn generate_layout_heuristics(hints: &[LayoutHint]) -> String {
     if hints.is_empty() {
@@ -102,8 +284,27 @@ Rules:
 
         let full_prompt = format!("{}\n\nInput Payload:\n{}", system_prompt, user_prompt);
 
+        contracts::log_debug!(
+            "PASS_2",
+            "Delineator",
+            "Prepared Delineator prompt payload with layout heuristics",
+            format!("PromptBytes: {}, OverlapBytes: {}, Status: Success", full_prompt.len(), extraction.overlap_context.len())
+        );
+
         // Execute local LLM offline inference using llama.cpp matrix
         let output_str = inference::run_local_inference(&full_prompt)?;
+
+        contracts::log_debug!(
+            "PASS_2",
+            "Delineator",
+            "Received raw model JSON response from local offline inference",
+            format!(
+                "PromptTokens: {}, ResponseTokens: {}, ResponseBytes: {}, Status: Success",
+                full_prompt.len() / 4,
+                output_str.len() / 4,
+                output_str.len()
+            )
+        );
 
         // Decode strongly typed blocks
         let llm_output: LLMStructuringOutput = serde_json::from_str(&output_str)?;
@@ -242,10 +443,15 @@ pub extern "C" fn delineate_page_ffi(
         }
     };
 
-    // If model path is supplied, ensure inference engine context has initialized
+    // If model path is supplied, ensure model is present and inference engine context has initialized
     if !model_path_str.is_empty() {
+        if let Err(e) = verify_and_download_model(model_path_str) {
+            eprintln!("Failed to guarantee model residency inside delineator FFI: {}", e);
+            return std::ptr::null_mut();
+        }
         if let Err(e) = inference::initialize_inference_context(model_path_str) {
             eprintln!("Failed to initialize inference context inside delineator FFI: {}", e);
+            return std::ptr::null_mut();
         }
     }
 

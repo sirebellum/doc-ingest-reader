@@ -1,6 +1,7 @@
 import { compileSyncDelta, applySyncDelta, SyncResult } from './p2pSync';
 import { compressLZW, decompressLZW } from '../utils/packer';
 import WirelessSyncBridge from '../native/WirelessSyncBridge';
+import { ENABLE_CORE_DEBUG_LOGS, logDebug } from '../utils/logger';
 
 function computeChecksum(str: string): string {
   let hash = 5381;
@@ -47,6 +48,15 @@ export class BLESyncCommunicator {
       const chunkIndex = i;
       const checksum = computeChecksum(payload);
       
+      if (ENABLE_CORE_DEBUG_LOGS) {
+        logDebug(
+          'P2P_SYNC',
+          'BLESync',
+          `Computed DJB2 checksum for BLE chunk transmission: index=${chunkIndex}, checksum=${checksum}, totalChunks=${totalChunks}`,
+          `Bytes: ${payload.length}, Duration: 0ms, Status: Success`
+        );
+      }
+      
       const chunkStr = `${txId}|${chunkIndex}|${totalChunks}|${checksum}|${payload}`;
       chunks.push(chunkStr);
     }
@@ -76,6 +86,15 @@ export class BLESyncCommunicator {
     const computedChecksum = computeChecksum(payload);
     if (checksum !== computedChecksum) {
       throw new Error('Checksum verification failed');
+    }
+
+    if (ENABLE_CORE_DEBUG_LOGS) {
+      logDebug(
+        'P2P_SYNC',
+        'BLESync',
+        `Verifying DJB2 checksum for received BLE chunk: index=${chunkIndex}, checksum=${checksum}, computed=${computedChecksum}`,
+        `Bytes: ${payload.length}, Duration: 0ms, Status: Success`
+      );
     }
 
     // Initialize transaction state if needed

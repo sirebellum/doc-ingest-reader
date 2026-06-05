@@ -4,6 +4,37 @@
 #include <stdexcept>
 #include <iostream>
 
+#ifdef ENABLE_CORE_DEBUG_LOGS
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <cmath>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
+namespace {
+std::string getTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    return std::to_string(ms);
+}
+
+void logDebug(const char* subsystem, const char* module, const std::string& message, const std::string& metrics = "") {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_DEBUG, "RustParserBridge", "[DEBUG][%s][%s::%s] -> %s | %s", getTimestamp().c_str(), subsystem, module, message.c_str(), metrics.c_str());
+#else
+    std::cout << "[DEBUG][" << getTimestamp() << "][" << subsystem << "::" << module << "] -> " << message;
+    if (!metrics.empty()) {
+        std::cout << " | " << metrics;
+    }
+    std::cout << std::endl;
+#endif
+}
+} // namespace
+#endif
+
 namespace facebook {
 namespace jsi {
 
@@ -409,6 +440,19 @@ std::pair<float*, size_t> getFloatArrayData(Runtime& runtime, const Value& val) 
     float* data = reinterpret_cast<float*>(arrayBuffer.data(runtime));
     size_t byteLength = arrayBuffer.size(runtime);
     size_t elementCount = byteLength / sizeof(float);
+
+#ifdef ENABLE_CORE_DEBUG_LOGS
+    {
+        std::stringstream ss;
+        ss << "Transferred Float32Array across language boundary (JSI bridge). Pointer: 0x" 
+           << std::hex << reinterpret_cast<uintptr_t>(data) << std::dec 
+           << ", ElementCount: " << elementCount;
+        std::stringstream metrics;
+        metrics << "Bytes: " << byteLength << ", Duration: 0ms, Status: Success";
+        logDebug("RUNTIME_INTERFACE", "JsiBridge", ss.str(), metrics.str());
+    }
+#endif
+
     return { data, elementCount };
 }
 
@@ -435,6 +479,10 @@ float computeCosineSimilarity(const float* vecA, const float* vecB, size_t size)
 }
 
 Value RustParserBridge::computeSimilarity(Runtime& runtime, const Value& vecA, const Value& vecB) {
+#ifdef ENABLE_CORE_DEBUG_LOGS
+    auto startTime = std::chrono::high_resolution_clock::now();
+#endif
+
     auto [dataA, sizeA] = getFloatArrayData(runtime, vecA);
     auto [dataB, sizeB] = getFloatArrayData(runtime, vecB);
     
@@ -443,10 +491,27 @@ Value RustParserBridge::computeSimilarity(Runtime& runtime, const Value& vecA, c
     }
     
     float sim = computeCosineSimilarity(dataA, dataB, sizeA);
+
+#ifdef ENABLE_CORE_DEBUG_LOGS
+    {
+        auto endTime = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count() / 1000.0;
+        std::stringstream ss;
+        ss << "Computed cosine similarity synchronous calculation. Result: " << sim;
+        std::stringstream metrics;
+        metrics << "VectorSize: " << sizeA << ", Duration: " << duration << "ms, Status: Success";
+        logDebug("RUNTIME_INTERFACE", "VectorMath", ss.str(), metrics.str());
+    }
+#endif
+
     return Value(static_cast<double>(sim));
 }
 
 Value RustParserBridge::computeBatchSimilarities(Runtime& runtime, const Value& targetVec, const Value& candidateVecs) {
+#ifdef ENABLE_CORE_DEBUG_LOGS
+    auto startTime = std::chrono::high_resolution_clock::now();
+#endif
+
     auto [targetData, targetSize] = getFloatArrayData(runtime, targetVec);
     
     if (!candidateVecs.isObject()) {
@@ -471,6 +536,19 @@ Value RustParserBridge::computeBatchSimilarities(Runtime& runtime, const Value& 
             float sim = computeCosineSimilarity(targetData, candidateData, targetSize);
             results.setValueAtIndex(runtime, i, static_cast<double>(sim));
         }
+
+#ifdef ENABLE_CORE_DEBUG_LOGS
+        {
+            auto endTime = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count() / 1000.0;
+            std::stringstream ss;
+            ss << "Computed batch cosine similarity synchronous calculation (contiguous matrix). Count: " << numCandidates;
+            std::stringstream metrics;
+            metrics << "CandidatesCount: " << numCandidates << ", VectorSize: " << targetSize << ", Duration: " << duration << "ms, Status: Success";
+            logDebug("RUNTIME_INTERFACE", "VectorMath", ss.str(), metrics.str());
+        }
+#endif
+
         return results;
     }
     
@@ -500,6 +578,19 @@ Value RustParserBridge::computeBatchSimilarities(Runtime& runtime, const Value& 
             results.setValueAtIndex(runtime, i, 0.0);
         }
     }
+
+#ifdef ENABLE_CORE_DEBUG_LOGS
+    {
+        auto endTime = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count() / 1000.0;
+        std::stringstream ss;
+        ss << "Computed batch cosine similarity synchronous calculation (fallback array). Count: " << numCandidates;
+        std::stringstream metrics;
+        metrics << "CandidatesCount: " << numCandidates << ", VectorSize: " << targetSize << ", Duration: " << duration << "ms, Status: Success";
+        logDebug("RUNTIME_INTERFACE", "VectorMath", ss.str(), metrics.str());
+    }
+#endif
+
     return results;
 }
 

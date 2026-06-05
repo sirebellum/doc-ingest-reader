@@ -25,10 +25,15 @@ Pod::Spec.new do |s|
   s.dependency 'React-jsi'
   s.dependency 'React-Core'
 
+  cplusplus_flags = '-DFOLLY_NO_CONFIG -DHERMES_ENABLE_DEBUGGER=1'
+  if ENV['ENABLE_CORE_DEBUG_LOGS'] == 'true'
+    cplusplus_flags += ' -DENABLE_CORE_DEBUG_LOGS=1'
+  end
+
   s.pod_target_xcconfig = {
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/../../../../mobile/src/native/cpp" "$(PODS_ROOT)/Headers/Public/React-hermes" "$(PODS_ROOT)/Headers/Public/hermes-engine" "$(PODS_ROOT)/Headers/Public/React-jsi"',
-    'OTHER_CPLUSPLUSFLAGS' => '-DFOLLY_NO_CONFIG -DHERMES_ENABLE_DEBUGGER=1'
+    'OTHER_CPLUSPLUSFLAGS' => cplusplus_flags
   }
   
   # Vendored libraries linked from the built rust_core libs directory

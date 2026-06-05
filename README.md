@@ -20,9 +20,18 @@ Ensure you have the following environments installed:
 Generate the CMake build files from the root directory:
 
 ```bash
-# Configure the build directory
+# Configure the build directory (default: logging disabled)
 cmake -B build
+
+# Configure the build directory with compile-time debug logging enabled
+cmake -B build -DENABLE_CORE_DEBUG_LOGS=ON
 ```
+
+### 1b. Run-Time Logging Configuration
+
+When `ENABLE_CORE_DEBUG_LOGS=ON` is set during CMake configuration, compile-time conditional debug logs are activated across both the native Rust core engines (`parser`, `delineator`, `inference`) and the React Native frontend.
+To trace these logs in real-time, launch the development servers. In the default configuration (logging disabled), all debug log strings, formatting logic, and FFI log blocks are entirely stripped from the production release binaries and Javascript bundles via compiler dead-code elimination and Rust `#[cfg(feature = "verbose-logging")]` attributes, ensuring zero performance regression.
+
 
 ### 2. Ingestion Pipeline & Test DB Generation
 
