@@ -12,6 +12,9 @@ use pdfium_render::prelude::{PdfPageObjectsCommon, PdfPageObjectCommon};
 #[allow(unused_imports)]
 use delineator as _;
 
+pub mod layout_engine;
+pub mod image_extractor;
+
 pub type BoundingBox = [f32; 4];
 
 
@@ -58,52 +61,7 @@ impl PdfExtractor for MockPdfExtractor {
     }
 }
 
-fn sort_segments_reading_order(segments: Vec<LayoutHint>) -> Vec<LayoutHint> {
-    if segments.is_empty() {
-        return segments;
-    }
 
-    // We want to group segments into lines.
-    // First, sort all segments by Y-center descending to process them top-to-bottom.
-    let mut sorted_by_y = segments;
-    sorted_by_y.sort_by(|a, b| {
-        let a_y = (a.bounding_box[1] + a.bounding_box[3]) / 2.0;
-        let b_y = (b.bounding_box[1] + b.bounding_box[3]) / 2.0;
-        b_y.partial_cmp(&a_y).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Group into lines based on Y-center similarity
-    let mut lines: Vec<Vec<LayoutHint>> = Vec::new();
-    for seg in sorted_by_y {
-        let seg_y = (seg.bounding_box[1] + seg.bounding_box[3]) / 2.0;
-        let mut matched_index = None;
-        
-        for (i, line) in lines.iter().enumerate() {
-            let line_y = (line[0].bounding_box[1] + line[0].bounding_box[3]) / 2.0;
-            // If they are vertically close (within 8.0 points), they are on the same line
-            if (seg_y - line_y).abs() < 8.0 {
-                matched_index = Some(i);
-                break;
-            }
-        }
-        
-        if let Some(idx) = matched_index {
-            lines[idx].push(seg);
-        } else {
-            lines.push(vec![seg]);
-        }
-    }
-
-    // Sort segments within each line left-to-right (ascending X coordinate)
-    for line in &mut lines {
-        line.sort_by(|a, b| {
-            a.bounding_box[0].partial_cmp(&b.bounding_box[0]).unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
-    // Flatten lines back into a single vector of segments
-    lines.into_iter().flatten().collect()
-}
 
 /// Production PDF extractor implementation using lopdf and pdfium-render
 pub struct RealPdfExtractor {
@@ -239,84 +197,8 @@ impl PdfExtractor for RealPdfExtractor {
             }
         }
         
-        // 3. Double-Column Layout Segmentation via Horizontal Coordinate Density Clustering
-        // Group segments into lines first to avoid false-positives from word-level boundaries
-        let mut sorted_segs = segments.clone();
-        sorted_segs.sort_by(|a, b| b.bounding_box[1].partial_cmp(&a.bounding_box[1]).unwrap_or(std::cmp::Ordering::Equal));
-
-        let mut lines: Vec<BoundingBox> = Vec::new();
-        for seg in &sorted_segs {
-            let seg_y_bottom = seg.bounding_box[1];
-            let seg_y_top = seg.bounding_box[3];
-            let seg_y_center = (seg_y_bottom + seg_y_top) / 2.0;
-
-            let mut found_line = false;
-            for line in &mut lines {
-                let line_y_bottom = line[1];
-                let line_y_top = line[3];
-                let line_y_center = (line_y_bottom + line_y_top) / 2.0;
-
-                // Merge segments with overlapping vertical space (threshold: 8.0 points)
-                if (seg_y_center - line_y_center).abs() < 8.0 {
-                    line[0] = line[0].min(seg.bounding_box[0]);
-                    line[1] = line[1].min(seg.bounding_box[1]);
-                    line[2] = line[2].max(seg.bounding_box[2]);
-                    line[3] = line[3].max(seg.bounding_box[3]);
-                    found_line = true;
-                    break;
-                }
-            }
-
-            if !found_line {
-                lines.push(seg.bounding_box);
-            }
-        }
-
-        let mut left_lines = 0;
-        let mut right_lines = 0;
-        let mut spanning_lines = 0;
-
-        for line in &lines {
-            let x_min = line[0];
-            let x_max = line[2];
-
-            if x_max < mid_x {
-                left_lines += 1;
-            } else if x_min > mid_x {
-                right_lines += 1;
-            } else {
-                spanning_lines += 1;
-            }
-        }
-
-        // A true double column page will have almost all lines restricted to one side of mid_x
-        let is_double_column = left_lines + right_lines > 2 * spanning_lines && (left_lines > 0 || right_lines > 0);
-        
-        println!("is_double_column: {}, left_lines: {}, right_lines: {}, spanning_lines: {}, lines_count: {}", is_double_column, left_lines, right_lines, spanning_lines, lines.len());
-
-        let mut sorted_segments;
-        if is_double_column {
-            // Split into columns and sort top-to-bottom (Y increases upwards in PDFium, so descending order)
-            let mut left_col: Vec<LayoutHint> = Vec::new();
-            let mut right_col: Vec<LayoutHint> = Vec::new();
-            
-            for seg in segments {
-                let mid_seg_x = (seg.bounding_box[0] + seg.bounding_box[2]) / 2.0;
-                if mid_seg_x < mid_x {
-                    left_col.push(seg);
-                } else {
-                    right_col.push(seg);
-                }
-            }
-            
-            let left_sorted = sort_segments_reading_order(left_col);
-            let right_sorted = sort_segments_reading_order(right_col);
-            
-            sorted_segments = left_sorted;
-            sorted_segments.extend(right_sorted);
-        } else {
-            sorted_segments = sort_segments_reading_order(segments);
-        }
+        // 3. Layout Segmentation and Sorting
+        let mut sorted_segments = layout_engine::LayoutEngine::compute_reading_order(segments, mid_x);
         
         // Construct raw layout-corrected text stream
         let mut raw_text = String::new();
@@ -339,139 +221,31 @@ impl PdfExtractor for RealPdfExtractor {
         }
         
         // 5. Image Extraction and Image-Caption boundary checking
-        // TODO (Architecture-Audit): [Parser] - Textured background processing overhead mitigation strategy.
-        let mut extracted_images = Vec::new();
         let pdf_path = Path::new(&self.pdf_path);
         let parent_dir = pdf_path.parent().unwrap_or_else(|| Path::new("."));
         let output_dir = parent_dir.join("images");
-        let _ = fs::create_dir_all(&output_dir);
         
-        let mut image_counter = 0;
-        for object in page.objects().iter() {
-            if let Some(image_obj) = object.as_image_object() {
-                image_counter += 1;
-                let image_id = format!("img-p{}-{}", page_number, image_counter);
+        let extracted_images = image_extractor::ImageExtractor::extract_images_from_page(
+            &page, &doc, &lopdf_doc, page_number, page_width, page_height, &output_dir
+        )?;
+        
+        for img in &extracted_images {
+            raw_text.push_str(&format!(" [Image: {}] ", img.local_uri));
+            
+            let img_y_min = img.bounding_box[1];
+            let img_x_min = img.bounding_box[0];
+            let img_x_max = img.bounding_box[2];
+            
+            for seg in &mut sorted_segments {
+                let seg_y_max = seg.bounding_box[3];
+                let seg_x_mid = (seg.bounding_box[0] + seg.bounding_box[2]) / 2.0;
                 
-                let mut bbox = [0.0, 0.0, 0.0, 0.0];
-                if let Ok(bounds) = image_obj.bounds() {
-                    bbox = [
-                        bounds.left().value,
-                        bounds.bottom().value,
-                        bounds.right().value,
-                        bounds.top().value,
-                    ];
-                }
-                
-                let mut hash = String::new();
-                let mut saved_successfully = false;
-                
-                // Try high-fidelity rendering image extraction with pdfium-render
-                if let Ok(dynamic_image) = image_obj.get_processed_image(&doc) {
-                    let temp_filename = format!("temp_{}.png", image_id);
-                    let temp_path = output_dir.join(&temp_filename);
-                    if dynamic_image.save(&temp_path).is_ok() {
-                        if let Ok(bytes) = fs::read(&temp_path) {
-                            let mut hasher = Sha256::new();
-                            hasher.update(&bytes);
-                            hash = format!("{:x}", hasher.finalize());
-                            
-                            let final_filename = format!("{}_{}.png", hash, image_id);
-                            let final_path = output_dir.join(&final_filename);
-                            if fs::rename(&temp_path, &final_path).is_ok() {
-                                saved_successfully = true;
-                                contracts::log_debug!(
-                                    "PASS_1",
-                                    "Parser",
-                                    format!("Saved extracted sandboxed image to storage path: {}", final_path.display()),
-                                    format!("ImageID: {}, Hash: {}, Status: Success", image_id, hash)
-                                );
-                            }
-                        }
-                        let _ = fs::remove_file(&temp_path);
-                    }
-                }
-                
-                // Fallback to lopdf direct dictionary stream parsing
-                if !saved_successfully {
-                    for (_obj_id, obj) in lopdf_doc.objects.iter() {
-                        if let Ok(stream) = obj.as_stream() {
-                            if let Ok(subtype) = stream.dict.get(b"Subtype") {
-                                if subtype.as_name().ok() == Some(b"Image" as &[u8]) {
-                                    if let Ok(raw_data) = stream.decompressed_content() {
-                                        let mut hasher = Sha256::new();
-                                        hasher.update(&raw_data);
-                                        hash = format!("{:x}", hasher.finalize());
-                                        
-                                        let final_filename = format!("{}_{}.png", hash, image_id);
-                                        let final_path = output_dir.join(&final_filename);
-                                        
-                                        if let Ok(mut file) = File::create(&final_path) {
-                                            if file.write_all(&raw_data).is_ok() {
-                                                saved_successfully = true;
-                                                contracts::log_debug!(
-                                                    "PASS_1",
-                                                    "Parser",
-                                                    format!("Saved extracted sandboxed image (fallback lopdf) to storage path: {}", final_path.display()),
-                                                    format!("ImageID: {}, Hash: {}, Status: Success", image_id, hash)
-                                                );
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Absolute fallback (resilience mockup stream data)
-                if !saved_successfully {
-                    let mut hasher = Sha256::new();
-                    hasher.update(image_id.as_bytes());
-                    hash = format!("{:x}", hasher.finalize());
-                    
-                    let final_filename = format!("{}_{}.png", hash, image_id);
-                    let final_path = output_dir.join(&final_filename);
-                    if let Ok(mut file) = File::create(&final_path) {
-                        let _ = file.write_all(b"PNG_BINARY_DATA_FALLBACK");
-                        contracts::log_debug!(
-                            "PASS_1",
-                            "Parser",
-                            format!("Saved absolute fallback image data to storage path: {}", final_path.display()),
-                            format!("ImageID: {}, Hash: {}, Status: Fallback", image_id, hash)
-                        );
-                    }
-                }
-                
-                let local_uri = format!("local-asset://{}_{}.png", hash, image_id);
-                extracted_images.push(ExtractedImageMetadata {
-                    image_id: image_id.clone(),
-                    sha256_hash: hash.clone(),
-                    bounding_box: bbox,
-                    page_width,
-                    page_height,
-                    local_uri: local_uri.clone(),
-                });
-                
-                // Inject local-asset scheme image marker into raw text stream
-                raw_text.push_str(&format!(" [Image: {}] ", local_uri));
-                
-                // Search for closest caption string immediately below image bounding box
-                let img_y_min = bbox[1];
-                let img_x_min = bbox[0];
-                let img_x_max = bbox[2];
-                
-                for seg in &mut sorted_segments {
-                    let seg_y_max = seg.bounding_box[3];
-                    let seg_x_mid = (seg.bounding_box[0] + seg.bounding_box[2]) / 2.0;
-                    
-                    if seg_y_max < img_y_min 
-                       && img_y_min - seg_y_max < 30.0 
-                       && seg_x_mid > img_x_min - 20.0 
-                       && seg_x_mid < img_x_max + 20.0 
-                       && (seg.text_snippet.starts_with("Fig") || seg.text_snippet.starts_with("Figure")) {
-                        seg.text_snippet = format!("[Caption: {}]", seg.text_snippet);
-                    }
+                if seg_y_max < img_y_min 
+                   && img_y_min - seg_y_max < 30.0 
+                   && seg_x_mid > img_x_min - 20.0 
+                   && seg_x_mid < img_x_max + 20.0 
+                   && (seg.text_snippet.starts_with("Fig") || seg.text_snippet.starts_with("Figure")) {
+                    seg.text_snippet = format!("[Caption: {}]", seg.text_snippet);
                 }
             }
         }

@@ -16,7 +16,7 @@ describe('RustParserBridge Native Binding Tests', () => {
     expect(parsed.layout_hints[0].font_size).toBe(18);
   });
 
-  it('should trigger the global C++ JSI function directly if it is defined', async () => {
+  it('should trigger the Expo module directly if it is defined', async () => {
     const mockJsiParse = jest.fn().mockResolvedValue(
       JSON.stringify({
         document_id: 'jsi-defined-id',
@@ -27,12 +27,17 @@ describe('RustParserBridge Native Binding Tests', () => {
       })
     );
 
-    // Inject mock JSI object onto global runtime
-    (global as any).RustParserBridge = {
-      parsePDFAsync: mockJsiParse,
-    } as any;
+    // Mock Expo module locally for this test
+    const mockExpoModule = { parsePDFAsync: mockJsiParse };
+    jest.doMock('expo-modules-core', () => ({
+      requireNativeModule: () => mockExpoModule,
+    }));
+    
+    // We must re-require the module to pickup the mock
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
 
-    const resString = await RustParserBridge.parsePDFAsync('docs/real.pdf');
+    const resString = await LocalBridge.parsePDFAsync('docs/real.pdf');
     const parsed = JSON.parse(resString);
 
     expect(mockJsiParse).toHaveBeenCalledTimes(1);
@@ -41,8 +46,10 @@ describe('RustParserBridge Native Binding Tests', () => {
     expect(parsed.page_number).toBe(42);
   });
 
-  it('should fall back to simulator mock when global JSI hook is absent for runInferenceAsync', async () => {
-    const resString = await RustParserBridge.runInferenceAsync('models/custom.gguf', 'What is local inference?');
+  it('should fall back to simulator mock when Expo module is absent for runInferenceAsync', async () => {
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
+    const resString = await LocalBridge.runInferenceAsync('models/custom.gguf', 'What is local inference?');
     const parsed = JSON.parse(resString);
 
     expect(parsed.blocks).toBeDefined();
@@ -52,7 +59,7 @@ describe('RustParserBridge Native Binding Tests', () => {
     expect(parsed.blocks[1].semantic_tags).toContain('npu');
   });
 
-  it('should trigger the global C++ JSI function directly for runInferenceAsync if defined', async () => {
+  it('should trigger the Expo module directly for runInferenceAsync if defined', async () => {
     const mockJsiInference = jest.fn().mockResolvedValue(
       JSON.stringify({
         blocks: [
@@ -69,12 +76,15 @@ describe('RustParserBridge Native Binding Tests', () => {
       })
     );
 
-    // Inject mock JSI object onto global runtime
-    (global as any).RustParserBridge = {
-      runInferenceAsync: mockJsiInference,
-    } as any;
+    const mockExpoModule = { runInferenceAsync: mockJsiInference };
+    jest.doMock('expo-modules-core', () => ({
+      requireNativeModule: () => mockExpoModule,
+    }));
+    
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
 
-    const resString = await RustParserBridge.runInferenceAsync('models/real.gguf', 'Real prompt');
+    const resString = await LocalBridge.runInferenceAsync('models/real.gguf', 'Real prompt');
     const parsed = JSON.parse(resString);
 
     expect(mockJsiInference).toHaveBeenCalledTimes(1);
@@ -85,7 +95,9 @@ describe('RustParserBridge Native Binding Tests', () => {
   });
 
   it('should fall back to simulator mock for getHeapStats when JSI is absent', async () => {
-    const resString = await RustParserBridge.getHeapStats();
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
+    const resString = await LocalBridge.getHeapStats();
     const stats = JSON.parse(resString);
 
     expect(stats.total_allocated_bytes).toBe(350000000);
@@ -93,7 +105,7 @@ describe('RustParserBridge Native Binding Tests', () => {
     expect(stats.system_memory_limit_bytes).toBe(1800000000);
   });
 
-  it('should trigger direct global JSI getHeapStats when defined', async () => {
+  it('should trigger direct Expo module getHeapStats when defined', async () => {
     const mockGetHeapStats = jest.fn().mockResolvedValue(
       JSON.stringify({
         total_allocated_bytes: 999,
@@ -104,11 +116,15 @@ describe('RustParserBridge Native Binding Tests', () => {
       })
     );
 
-    (global as any).RustParserBridge = {
-      getHeapStats: mockGetHeapStats,
-    } as any;
+    const mockExpoModule = { getHeapStats: mockGetHeapStats };
+    jest.doMock('expo-modules-core', () => ({
+      requireNativeModule: () => mockExpoModule,
+    }));
+    
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
 
-    const resString = await RustParserBridge.getHeapStats();
+    const resString = await LocalBridge.getHeapStats();
     const stats = JSON.parse(resString);
 
     expect(mockGetHeapStats).toHaveBeenCalledTimes(1);
@@ -116,7 +132,9 @@ describe('RustParserBridge Native Binding Tests', () => {
   });
 
   it('should fall back to simulator mock for configureNpu when JSI is absent', async () => {
-    const resCode = await RustParserBridge.configureNpu({
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
+    const resCode = await LocalBridge.configureNpu({
       useAppleNeuralEngine: true,
       useAndroidDspNpu: true,
       gpuLayersOffload: 16,
@@ -126,14 +144,18 @@ describe('RustParserBridge Native Binding Tests', () => {
     expect(resCode).toBe(0);
   });
 
-  it('should trigger direct global JSI configureNpu when defined', async () => {
+  it('should trigger direct Expo module configureNpu when defined', async () => {
     const mockConfigureNpu = jest.fn().mockResolvedValue(42);
 
-    (global as any).RustParserBridge = {
-      configureNpu: mockConfigureNpu,
-    } as any;
+    const mockExpoModule = { configureNpu: mockConfigureNpu };
+    jest.doMock('expo-modules-core', () => ({
+      requireNativeModule: () => mockExpoModule,
+    }));
+    
+    jest.resetModules();
+    const { RustParserBridge: LocalBridge } = require('../RustParserBridge');
 
-    const resCode = await RustParserBridge.configureNpu({
+    const resCode = await LocalBridge.configureNpu({
       useAppleNeuralEngine: false,
       useAndroidDspNpu: false,
       gpuLayersOffload: 0,

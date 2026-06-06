@@ -36,22 +36,9 @@ function toFloat32Array(bytes: any): Float32Array {
  * @param limit - Maximum number of results to return (default: 20)
  * @returns An array of HybridSearchResult sorted by combined RRF score descending
  */
-export function searchHybrid(
-  dbInstance: any,
-  documentId: string,
-  queryText: string,
-  weights: { keyword: number; semantic: number } = { keyword: 0.5, semantic: 0.5 },
-  limit: number = 20
-): HybridSearchResult[] {
-  const db = getDatabaseAdapter(dbInstance);
+// Removed broken searchHybrid signature
 
-  // Clean the query text slightly to prevent FTS syntax crashes
-  const ftsQuery = queryText.replace(/[^\w\s]/g, ' ').trim();
-  if (!ftsQuery) {
-    return [];
-  }
-
-  // 1. Keyword Retrieval using FTS5 MATCH and BM25, sorted by score descending
+export function fetchKeywordCandidates(db: any, documentId: string, ftsQuery: string) {
   const keywordQuery = `
     SELECT b.id, b.content, -bm25(blocks_fts) as bm25_score
     FROM blocks b
@@ -61,19 +48,17 @@ export function searchHybrid(
 
   let keywordResults: any[] = [];
   try {
-    keywordResults = db.all<any>(keywordQuery, [documentId, ftsQuery]);
+    keywordResults = db.all(keywordQuery, [documentId, ftsQuery]);
   } catch (e) {
     try {
-      keywordResults = db.all<any>(keywordQuery, [documentId, `"${ftsQuery}"`]);
+      keywordResults = db.all(keywordQuery, [documentId, `"${ftsQuery}"`]);
     } catch (err) {
       keywordResults = [];
     }
   }
 
-  // Sort by BM25 score descending
   keywordResults.sort((a, b) => b.bm25_score - a.bm25_score);
 
-  // Calculate min-max normalized scores for FTS5 keyword relevance display
   let minBM25 = Infinity;
   let maxBM25 = -Infinity;
   keywordResults.forEach((r) => {
@@ -90,13 +75,15 @@ export function searchHybrid(
     keywordScoreMap.set(r.id, normalized);
   });
 
-  // Build keyword 1-indexed rank map
   const keywordRankMap = new Map<string, number>();
   keywordResults.forEach((r, idx) => {
     keywordRankMap.set(r.id, idx + 1);
   });
 
-  // 2. Semantic Retrieval from binary vector_cache table
+  return { keywordResults, keywordScoreMap, keywordRankMap };
+}
+
+export function fetchSemanticCandidates(db: any, documentId: string, queryText: string) {
   const semanticQuery = `
     SELECT b.id, b.content, vc.vector 
     FROM blocks b 
@@ -106,12 +93,11 @@ export function searchHybrid(
   
   let semanticResults: any[] = [];
   try {
-    semanticResults = db.all<any>(semanticQuery, [documentId]);
+    semanticResults = db.all(semanticQuery, [documentId]);
   } catch (e) {
     semanticResults = [];
   }
 
-  // Calculate semantic similarities in batch using synchronous JSI bridge
   const queryVector = generateEmbedding(queryText);
   let similarityScores: number[] = [];
   if (semanticResults.length > 0) {
@@ -121,7 +107,6 @@ export function searchHybrid(
       similarityScores = RustParserBridge.computeBatchSimilarities(Float32QueryVector, candidateVectors);
     } catch (err) {
       console.warn('[Search] Native batch similarity failed, falling back to JS loops', err);
-      // Fallback: manually calculate similarities if batch throws
       const cosineSimilarity = require('../utils/embeddings').cosineSimilarity;
       similarityScores = semanticResults.map((r) => {
         try {
@@ -134,7 +119,6 @@ export function searchHybrid(
     }
   }
 
-  // Map semantic results to their scores
   const semanticCandidates = semanticResults
     .map((row, idx) => ({
       id: row.id,
@@ -144,7 +128,6 @@ export function searchHybrid(
     .filter(c => c.score > 0.15)
     .sort((a, b) => b.score - a.score);
 
-  // Build semantic 1-indexed rank map
   const semanticRankMap = new Map<string, number>();
   semanticCandidates.forEach((c, idx) => {
     semanticRankMap.set(c.id, idx + 1);
@@ -155,7 +138,17 @@ export function searchHybrid(
     semanticScoreMap.set(c.id, c.score);
   });
 
-  // 3. Reciprocal Rank Fusion (RRF) Fusing
+  return { semanticResults, semanticCandidates, semanticScoreMap, semanticRankMap };
+}
+
+export function applyReciprocalRankFusion(
+  keywordData: ReturnType<typeof fetchKeywordCandidates>,
+  semanticData: ReturnType<typeof fetchSemanticCandidates>,
+  limit: number
+): HybridSearchResult[] {
+  const { keywordResults, keywordScoreMap, keywordRankMap } = keywordData;
+  const { semanticResults, semanticCandidates, semanticScoreMap, semanticRankMap } = semanticData;
+
   const allCandidateIds = new Set<string>([
     ...keywordResults.map((r) => r.id),
     ...semanticCandidates.map((r) => r.id)
@@ -199,8 +192,27 @@ export function searchHybrid(
     });
   });
 
-  // Sort by combinedScore descending and apply limit
   return combinedResults
     .sort((a, b) => b.combinedScore - a.combinedScore)
     .slice(0, limit);
+}
+
+export function searchHybrid(
+  dbInstance: any,
+  documentId: string,
+  queryText: string,
+  weights: { keyword: number; semantic: number } = { keyword: 0.5, semantic: 0.5 },
+  limit: number = 20
+): HybridSearchResult[] {
+  const db = getDatabaseAdapter(dbInstance);
+
+  const ftsQuery = queryText.replace(/[^\w\s]/g, ' ').trim();
+  if (!ftsQuery) {
+    return [];
+  }
+
+  const keywordData = fetchKeywordCandidates(db, documentId, ftsQuery);
+  const semanticData = fetchSemanticCandidates(db, documentId, queryText);
+
+  return applyReciprocalRankFusion(keywordData, semanticData, limit);
 }

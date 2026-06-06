@@ -3,6 +3,7 @@ import { Dimensions, ScaledSize, StyleSheet, View, ActivityIndicator, Platform }
 import { FlashList } from '@shopify/flash-list';
 import { BlockCell } from './BlockCell';
 import type { Block, Annotation } from './BlockCell';
+import { isTabletWidth, getScrollAction } from '../utils/layout';
 
 export type { Block, Annotation };
 
@@ -32,33 +33,7 @@ export interface FlashListReaderProps {
   onScroll?: () => void;
 }
 
-/**
- * Pure function: Evaluates if a given viewport width matches the tablet threshold
- */
-export function isTabletWidth(width: number): boolean {
-  return width >= 768;
-}
 
-/**
- * Pure function: Computes if a scroll offset event triggers a boundary prefetch action
- */
-export function getScrollAction(
-  contentOffsetY: number,
-  layoutHeight: number,
-  contentHeight: number,
-  prevSectionId?: string,
-  nextSectionId?: string
-): { sectionId: string; direction: 'prev' | 'next' } | null {
-  const scrollThreshold = contentHeight * 0.1; // 10% proximity window
-
-  if (contentOffsetY <= scrollThreshold && prevSectionId) {
-    return { sectionId: prevSectionId, direction: 'prev' };
-  } else if (contentOffsetY + layoutHeight >= contentHeight - scrollThreshold && nextSectionId) {
-    return { sectionId: nextSectionId, direction: 'next' };
-  }
-
-  return null;
-}
 
 /**
  * Custom hook to manage responsive reading views and dynamic boundaries
@@ -116,49 +91,6 @@ export function useFlashListReader(props: FlashListReaderProps) {
  */
 export function FlashListReader(props: FlashListReaderProps) {
   const { blocks, annotations = [], onPressBlock, isLoading = false, theme, typography, onScroll } = props;
-
-  if ((Platform.OS as string) === 'web') {
-    return (
-      <div 
-        onScroll={onScroll}
-        style={{
-          flex: 1,
-          height: '100%',
-          overflowY: 'auto',
-          backgroundColor: theme?.backgroundColor || 'hsl(220, 15%, 8%)',
-          padding: '16px 8px',
-          userSelect: 'text',
-          WebkitUserSelect: 'text',
-        }}
-        data-testid="flashlist-reader-container"
-      >
-        {isLoading && (
-          <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(18, 18, 18, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
-            <ActivityIndicator size="large" color="hsl(210, 100%, 75%)" />
-          </div>
-        )}
-        {blocks.map((item) => {
-          const blockAnnotations = annotations.filter((ann) => ann.block_id === item.id);
-          return (
-            <BlockCell
-              key={item.id}
-              block={item}
-              annotations={blockAnnotations}
-              onPressBlock={onPressBlock}
-              theme={theme}
-              typography={typography}
-            />
-          );
-        })}
-        {blocks.length === 0 && !isLoading && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px' }}>
-            <ActivityIndicator size="small" color="hsl(0, 0%, 50%)" style={{ marginBottom: 12 }} />
-          </div>
-        )}
-      </div>
-    );
-  }
-
   const { handleScrollProximity } = useFlashListReader(props);
   const flashListRef = useRef<FlashList<Block>>(null);
  

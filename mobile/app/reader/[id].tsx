@@ -27,10 +27,10 @@ import {
   FlashListReader, 
   Block, 
   Annotation, 
-  isTabletWidth, 
   StickyPaginationBar,
   NoteEditor
 } from '../../src/components';
+import { isTabletWidth } from '../../src/utils/layout';
 import { TypographyConfig } from '../../src/database/pagination';
 import { useDatabaseSync } from '../../src/hooks/useDatabaseSync';
 import { db } from '../../src/database/schema';
@@ -279,7 +279,7 @@ export default function ReadingScreen() {
     if (!isTablet && isLeftPaneVisible) {
       closeLeftDrawer();
     } else {
-      setIsLeftPaneVisible(prev => !prev);
+      setIsLeftPaneVisible((prev: boolean) => !prev);
     }
   };
 
@@ -288,13 +288,13 @@ export default function ReadingScreen() {
     if (!isTablet && isRightPaneVisible) {
       closeRightDrawer();
     } else {
-      setIsRightPaneVisible(prev => !prev);
+      setIsRightPaneVisible((prev: boolean) => !prev);
     }
   };
 
   const toggleToolsCollapsed = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setIsToolsCollapsed(prev => !prev);
+    setIsToolsCollapsed((prev: boolean) => !prev);
   };
 
   // Tablet sidebar width and opacity animations for web compatibility

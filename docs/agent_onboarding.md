@@ -43,8 +43,8 @@ The mobile application runs on Expo SDK 50/React Native:
 * **FTS5 Plain-Text Index**: Full-Text Search uses virtual tables and native SQLite FTS5 extension, with custom triggers extracting text recursively from AST JSON content to prevent XHTML/JSON formatting pollution.
 
 ### `mobile/modules/` (The High-Speed JSI Bridge)
-* **Technology**: Local Expo Module (`mobile/modules/rust-parser-bridge` and C++ host object `mobile/src/native/cpp/RustParserBridge.cpp`).
-* **JSI Host Object**: Registers synchronous methods (`computeSimilarity`, `computeBatchSimilarities`) and asynchronous Promise-based threads (`parsePDFAsync`, `delineatePageAsync`, `runInferenceAsync`).
+* **Technology**: Local Expo Module (`mobile/modules/rust-parser-bridge` and C++ JNI exports `mobile/src/native/cpp/RustParserBridge.cpp`).
+* **JSI Host Object & Expo Module**: Asynchronous thread offloading (`parsePDFAsync`, `delineatePageAsync`, `runInferenceAsync`) is safely orchestrated via Expo's `AsyncFunction` Kotlin bindings. The pure C++ JSI host object registers only synchronous methods (`computeSimilarity`, `computeBatchSimilarities`) to avoid raw `std::thread` stability issues in React Native contexts.
 * **Hardware-Accelerated Math**: Bypasses JSI array serializations by obtaining direct pointers to `Float32Array` raw memory buffers. Computes cosine similarity synchronously with SIMD vectorization loops (`#pragma clang loop vectorize(enable)` / `#pragma GCC ivdep`), giving high-speed vector math performance directly in the JavaScript thread.
 
 ---

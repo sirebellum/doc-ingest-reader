@@ -266,6 +266,11 @@ if (Platform.OS === 'web') {
   db = SQLite.openDatabaseSync('llm_pdf_reader.db');
 }
 
+export const JSON_EXTRACT_MACRO = `CASE 
+  WHEN json_valid(new.content) THEN (SELECT group_concat(value, ' ') FROM json_tree(new.content) WHERE key IN ('text', 'code', 'alt', 'caption'))
+  ELSE new.content
+END`;
+
 export const INITIALIZE_DATABASE_SCHEMA = `
   PRAGMA foreign_keys = ON;
 
@@ -388,10 +393,7 @@ export const INITIALIZE_DATABASE_SCHEMA = `
     INSERT INTO blocks_fts(block_id, content)
     VALUES (
       new.id,
-      CASE 
-        WHEN json_valid(new.content) THEN (SELECT group_concat(value, ' ') FROM json_tree(new.content) WHERE key IN ('text', 'code', 'alt', 'caption'))
-        ELSE new.content
-      END
+      ${JSON_EXTRACT_MACRO}
     );
   END;
 
@@ -404,12 +406,10 @@ export const INITIALIZE_DATABASE_SCHEMA = `
     INSERT INTO blocks_fts(block_id, content)
     VALUES (
       new.id,
-      CASE 
-        WHEN json_valid(new.content) THEN (SELECT group_concat(value, ' ') FROM json_tree(new.content) WHERE key IN ('text', 'code', 'alt', 'caption'))
-        ELSE new.content
-      END
+      ${JSON_EXTRACT_MACRO}
     );
   END;
+
 `;
 
 export function setupDatabase() {

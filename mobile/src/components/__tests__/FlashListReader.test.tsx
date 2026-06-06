@@ -14,7 +14,8 @@ jest.mock('@shopify/flash-list', () => {
 });
 
 import React from 'react';
-import { FlashListReader, isTabletWidth, getScrollAction } from '../FlashListReader';
+import { FlashListReader } from '../FlashListReader';
+import { isTabletWidth, getScrollAction } from '../../utils/layout';
 
 describe('FlashListReader Rendering & Scrolling Core', () => {
   const mockBlocks = [

@@ -325,14 +325,7 @@ When importing `shared_notes.json`:
 - **Unified CMake Build & Test Automation Wrapper**: Overhauled the top-level build workspace structure by introducing configuration toggles `BUILD_ANDROID_APK` (Default: `OFF`), `BUILD_IOS_FRAMEWORK` (Default: `OFF`), `RUN_INTEGRATION_TESTS` (Default: `ON`), and `LLAMA_NATIVE` (Default: `OFF`). Created sub-level `CMakeLists.txt` configurations for `/rust_core` and `/mobile` directing Cargo and Node task compilation chains. Configured CMake modules (`FetchContent`) to fetch and compile upstream dependencies (`llama.cpp`) with offline caching validation, integrated test setups for Cargo, Jest, and README validation checks via CTest, and added pre-build safety gates inside local JSI modules (`build.gradle` and `RustParserBridgeModule.podspec`).
 
 ### [v2.9.0] - 2026-06-05
-- **Clean Keyboard Interrupt Exit for Web Server**: Resolved an issue where cancelling/interrupting the `start-web-server` CMake target left the Expo Node.js server running in the background on Windows. Created a custom Node.js script wrapper `mobile/scripts/start-web-server.js` that sets the environment variables (`BROWSER=none` and `EXPO_NO_BROWSER=true`), configures `process.argv` arguments, and executes the `@expo/cli` entry-point directly. Updated `mobile/CMakeLists.txt` to execute this script using `${NODE_EXE}` directly, avoiding batch file (`npm.cmd`) process group issues and ensuring clean termination on SIGINT/cancellation.
+- **Clean Keyboard Interrupt Exit for Web Server**: Resolved an issue where cancelling/interrupting the `start-web-server` CMake target left the Expo Node.js server running in the background on Windows. Created a custom Node.js script wrapper `mobile/scripts/start-web-server.js` that sets the environment variables (`BROWSER=none` and `EXPO_NO_BROWSER=true`) , configures `process.argv` arguments, and executes the `@expo/cli` entry-point directly. Updated `mobile/CMakeLists.txt` to execute this script using `${NODE_EXE}` directly, avoiding batch file (`npm.cmd`) process group issues and ensuring clean termination on SIGINT/cancellation.
 
-
-
-
-
-
-
-
-
-
+### [v3.0.0] - 2026-06-05
+- **AsyncFunction Expo Bridge Refactoring**: Addressed stability issues related to manual `std::thread` usage in the React Native JSI layer. Migrated all asynchronous host object methods (`parsePDFAsync`, `runInferenceAsync`, `delineatePageAsync`, `getHeapStats`, `configureNpu`) to Expo's `AsyncFunction` Kotlin API utilizing standard JNI synchronous exports in C++. Kept high-performance array operations (`computeSimilarity`) tightly bound to the pure zero-copy C++ JSI host object. Updated `RustParserBridge.ts` to seamlessly import the Expo Module.

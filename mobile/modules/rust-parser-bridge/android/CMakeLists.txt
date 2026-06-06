@@ -21,6 +21,7 @@ set(RUST_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../rust_core/libs/aarch6
 add_library(RustParserBridge SHARED
     src/main/cpp/jni-bridge.cpp
     ../../../../src/native/cpp/RustParserBridge.cpp
+    ../../../../src/native/cpp/VectorMath.cpp
 )
 
 # Set include directories

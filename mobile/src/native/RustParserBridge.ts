@@ -8,6 +8,14 @@ if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
 
 import { Platform } from 'react-native';
 
+let ExpoRustParserBridgeModule: any = null;
+try {
+  const { requireNativeModule } = require('expo-modules-core');
+  ExpoRustParserBridgeModule = requireNativeModule('RustParserBridgeModule');
+} catch (e) {
+  // Ignore
+}
+
 export interface BoundingBox {
   bounding_box: [number, number, number, number];
   font_size: number;
@@ -72,8 +80,8 @@ declare global {
 export const RustParserBridge = {
   async parsePDFAsync(localPath: string): Promise<string> {
     let resultString: string;
-    if (global.RustParserBridge && typeof global.RustParserBridge.parsePDFAsync === 'function') {
-      resultString = await global.RustParserBridge.parsePDFAsync(localPath);
+    if (ExpoRustParserBridgeModule && typeof ExpoRustParserBridgeModule.parsePDFAsync === 'function') {
+      resultString = await ExpoRustParserBridgeModule.parsePDFAsync(localPath);
     } else {
       resultString = await RustParserBridge.parsePDFAsyncFallback(localPath);
     }
@@ -635,8 +643,8 @@ export const RustParserBridge = {
   },
 
   async runInferenceAsync(modelPath: string, prompt: string): Promise<string> {
-    if (global.RustParserBridge && typeof global.RustParserBridge.runInferenceAsync === 'function') {
-      return global.RustParserBridge.runInferenceAsync(modelPath, prompt);
+    if (ExpoRustParserBridgeModule && typeof ExpoRustParserBridgeModule.runInferenceAsync === 'function') {
+      return ExpoRustParserBridgeModule.runInferenceAsync(modelPath, prompt);
     }
 
     // Try fetching from local Desktop server if running in Web browser
@@ -689,8 +697,8 @@ export const RustParserBridge = {
   },
 
   async delineatePageAsync(pageExtractionJson: string, modelPath: string): Promise<string> {
-    if (global.RustParserBridge && typeof global.RustParserBridge.delineatePageAsync === 'function') {
-      return global.RustParserBridge.delineatePageAsync(pageExtractionJson, modelPath);
+    if (ExpoRustParserBridgeModule && typeof ExpoRustParserBridgeModule.delineatePageAsync === 'function') {
+      return ExpoRustParserBridgeModule.delineatePageAsync(pageExtractionJson, modelPath);
     }
 
     if (Platform.OS === 'web') {
@@ -771,8 +779,8 @@ export const RustParserBridge = {
   },
 
   async getHeapStats(): Promise<string> {
-    if (global.RustParserBridge && typeof global.RustParserBridge.getHeapStats === 'function') {
-      return global.RustParserBridge.getHeapStats();
+    if (ExpoRustParserBridgeModule && typeof ExpoRustParserBridgeModule.getHeapStats === 'function') {
+      return ExpoRustParserBridgeModule.getHeapStats();
     }
 
     // Dev/Test Fallback Mock Profiler
@@ -790,8 +798,8 @@ export const RustParserBridge = {
   },
 
   async configureNpu(config: NpuConfig): Promise<number> {
-    if (global.RustParserBridge && typeof global.RustParserBridge.configureNpu === 'function') {
-      return global.RustParserBridge.configureNpu(config);
+    if (ExpoRustParserBridgeModule && typeof ExpoRustParserBridgeModule.configureNpu === 'function') {
+      return ExpoRustParserBridgeModule.configureNpu(JSON.stringify(config));
     }
 
     console.log('[RustParserBridge] Configuring NPU settings on developer mock:', config);
