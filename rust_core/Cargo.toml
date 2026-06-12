@@ -1,5 +1,5 @@
 [workspace]
-members = ["parser", "inference", "desktop_server", "contracts", "delineator"]
+members = ["parser", "inference", "desktop_server", "contracts"]
 resolver = "2"
 
 

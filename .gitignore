@@ -138,7 +138,6 @@ cmake_install.cmake
 # ------------------------------------------
 # Keep standard repository assets under /assets,
 # but ignore ingested sandbox documents, extracts, and temporary storage
-*.epub
 /mobile/assets/sandbox/
 /mobile/assets/extracted/
 output/
@@ -146,11 +145,14 @@ downloads/
 tmp/
 temp/
 /scratch/
+*.png
+*.pdf
+*.7z
 
 # ------------------------------------------
-# Test Inputs (binary / large PDF fixtures)
+# Test Artifacts & Inputs
 # ------------------------------------------
-# Real PDF documents used for integration tests — too large for git
-/test_inputs/
+/test_artifacts/*
+!/test_artifacts/test_inputs/
 *.part
 *.lock

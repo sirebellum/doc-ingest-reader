@@ -15,10 +15,8 @@ anyhow = "1.0"
 sha2 = "0.10"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 contracts = { path = "../contracts" }
-delineator = { path = "../delineator" }
-
 [features]
-verbose-logging = ["contracts/verbose-logging", "delineator/verbose-logging"]
+verbose-logging = ["contracts/verbose-logging"]
 
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }
@@ -26,10 +24,7 @@ uuid = { version = "1.8", features = ["v4"] }
 inference = { path = "../inference" }
 printpdf = "0.7.0"
 
-[[test]]
-name = "e2e_synthetic_validation"
-path = "../tests/e2e_synthetic_validation.rs"
 
 
 
-
+agent_harness = { path = "../agent_harness" }

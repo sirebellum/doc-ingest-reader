@@ -1,0 +1,45 @@
+appId: host.exp.exponent
+name: High Speed Scroll and Component Recycling - Smartphone
+---
+- launchApp:
+    clearState: false
+
+# Navigate to Library or Import view
+- tapOn: "Import Document" # Assumes there's an import button
+
+# Select the synthesized document
+- tapOn: "synthetic_e2e_test"
+
+# Wait for Ingestion (Pass 1 & Pass 2)
+# We use a broad text assertion that would appear when complete, e.g., the title
+- extendedWaitUntil:
+    visible: "Chapter 1: The Beginning"
+    timeout: 120000 # 2 minutes for LLM ingestion
+
+# High-Velocity Scrolling Test
+# We swipe multiple times to trigger component recycling and test height calculation isolation
+- swipe:
+    direction: DOWN
+    duration: 100
+- swipe:
+    direction: DOWN
+    duration: 100
+- swipe:
+    direction: DOWN
+    duration: 100
+
+# Assert that no UI thread errors or "redboxes" are visible
+- assertNotVisible: "Error"
+- assertNotVisible: "Exception"
+
+# Chapter-Wide Memory Swapping validation
+# Swipe back up to test memory unswapping/re-caching
+- swipe:
+    direction: UP
+    duration: 200
+
+# Open Drawer / Smartphone TOC to verify adaptive UI loaded chapters
+- tapOn:
+    id: "menu-trigger" # Assuming there's a menu button
+- assertVisible: "Chapter 1: The Beginning"
+- assertVisible: "Chapter 2: Component Recycling"

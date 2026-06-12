@@ -4,7 +4,6 @@ import { FlashList } from '@shopify/flash-list';
 import { BlockCell } from './BlockCell';
 import type { Block, Annotation } from './BlockCell';
 import { isTabletWidth, getScrollAction } from '../utils/layout';
-
 export type { Block, Annotation };
 
 export interface FlashListReaderProps {

@@ -82,9 +82,9 @@ Usage:
   npx ts-node src/database/runIngestCLI.ts [options]
 
 Options:
-  -f, --file <name>       Name of the file in test_inputs/ (or path to any file) to ingest.
-                          Example: --file "Research Notes.pdf"
-  -a, --all               Ingest all files declared in test_inputs/manifest.json.
+  -f, --file <name>       Name of the file in test_artifacts/test_inputs/ (or path to any file) to ingest.
+  -o, --output <name>     Name of the output SQLite file (default: llm_pdf_reader.db).
+  -a, --all               Ingest all files declared in test_artifacts/test_inputs/manifest.json.
   -r, --route <route>     LLM route to use: local, network, cloud. (Default: local)
   -e, --endpoint <url>    Local network endpoint (e.g. http://localhost:11434 for Ollama)
   -p, --provider <name>   Cloud provider if using cloud: gemini, claude, openai
@@ -115,7 +115,7 @@ async function run() {
   }
 
   const assetsDbPath = path.join(assetsDir, 'llm_pdf_reader.db');
-  const testInputsDir = path.resolve(__dirname, '../../../test_inputs');
+  const testInputsDir = path.resolve(__dirname, '../../../test_artifacts/test_inputs');
   const manifestPath = path.join(testInputsDir, 'manifest.json');
 
   console.log(`\n📂 Active Database Path: ${assetsDbPath}`);

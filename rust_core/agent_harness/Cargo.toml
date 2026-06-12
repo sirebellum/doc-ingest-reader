@@ -1,5 +1,5 @@
 [package]
-name = "delineator"
+name = "agent_harness"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +9,8 @@ serde_json = "1.0"
 anyhow = "1.0"
 contracts = { path = "../contracts" }
 inference = { path = "../inference" }
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+uuid = { version = "1.8", features = ["v4", "fast-rng"] }
 
 [features]
 verbose-logging = ["contracts/verbose-logging", "inference/verbose-logging"]

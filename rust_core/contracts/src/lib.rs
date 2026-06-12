@@ -26,11 +26,14 @@ pub enum ASTNode {
     },
     Text {
         text: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        
         bold: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        
         italic: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        
         code: Option<bool>,
     },
     Link {
@@ -68,7 +71,8 @@ pub struct TableRow {
 #[ts(export, export_to = "../../../mobile/src/shared/types/TableCell.ts")]
 pub struct TableCell {
     pub children: Vec<ASTNode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    
     pub is_header: Option<bool>,
 }
 
@@ -121,6 +125,14 @@ pub struct PageExtraction {
     pub raw_text: String,
     pub layout_hints: Vec<LayoutHint>,
     pub extracted_images: Vec<ExtractedImageMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractionChunk.ts")]
+pub struct ExtractionChunk {
+    pub document_id: String,
+    pub chunk_index: u32,
+    pub raw_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

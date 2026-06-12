@@ -1,0 +1,37 @@
+appId: host.exp.exponent
+name: High Speed Scroll and Component Recycling - Tablet
+---
+- launchApp:
+    clearState: false
+
+# Note: In a tablet viewport, the docked navigation sidebar is visible by default.
+- tapOn: "Import Document"
+- tapOn: "synthetic_e2e_test"
+
+- extendedWaitUntil:
+    visible: "Chapter 1: The Beginning"
+    timeout: 120000
+
+# High-Velocity Scrolling Test in the middle pane (FlashList Reader Container)
+- swipe:
+    direction: DOWN
+    duration: 50
+- swipe:
+    direction: DOWN
+    duration: 50
+- swipe:
+    direction: DOWN
+    duration: 50
+- swipe:
+    direction: DOWN
+    duration: 50
+- swipe:
+    direction: DOWN
+    duration: 50
+
+# Assert stability
+- assertNotVisible: "Error"
+
+# Verify TOC in the left pane (Docked Navigation Sidebar) is immediately visible and correct
+- assertVisible: "Chapter 1: The Beginning"
+- assertVisible: "Chapter 2: Component Recycling"

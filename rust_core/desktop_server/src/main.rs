@@ -16,9 +16,9 @@ fn main() {
     }
     
     let resolved_path = db_path.unwrap_or_else(|| {
-        let p1 = "target/test_artifacts/test_corpus.db";
-        let p2 = "rust_core/target/test_artifacts/test_corpus.db";
-        let p3 = "rust_core/parser/target/test_artifacts/test_corpus.db";
+        let p1 = "test_artifacts/test_dbs/e2e_integration/test_corpus.db";
+        let p2 = "../test_artifacts/test_dbs/e2e_integration/test_corpus.db";
+        let p3 = "../../test_artifacts/test_dbs/e2e_integration/test_corpus.db";
         let p4 = "parser/target/test_artifacts/test_corpus.db";
         if std::path::Path::new(p1).exists() {
             p1.to_string()
@@ -210,40 +210,7 @@ fn handle_request(mut request: Request) {
         }
 
         ("POST", "/delineate") => {
-            let page_extraction_json = json_val["page_extraction"].to_string();
-            let model_path = json_val["model_path"].as_str().unwrap_or("").to_string();
-
-            println!("[Desktop Server] Running delineator. Page JSON length: {}", page_extraction_json.len());
-
-            if !model_path.is_empty() {
-                if let Err(e) = inference::initialize_inference_context(&model_path) {
-                    eprintln!("[Desktop Server] Context initialization failed inside delineator endpoint: {}", e);
-                }
-            }
-
-            let extraction: parser::PageExtraction = match serde_json::from_str(&page_extraction_json) {
-                Ok(ext) => ext,
-                Err(e) => {
-                    let err_res = format!("{{\"error\":\"Failed to parse page extraction in desktop server: {}\"}}", e);
-                    let mut res = Response::from_string(err_res).with_status_code(400);
-                    let content_type = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
-                    res = res.with_header(content_type);
-                    for h in response_headers {
-                        res = res.with_header(h);
-                    }
-                    let _ = request.respond(res);
-                    return;
-                }
-            };
-
-            let result_str = match delineator::DocumentDelineator::delineate_content(&extraction) {
-                Ok(res) => serde_json::to_string(&res).unwrap_or_default(),
-                Err(e) => format!("{{\"error\":\"Delineation execution failed: {}\"}}", e),
-            };
-
-            let mut res = Response::from_string(result_str)
-                .with_status_code(200);
-
+            let mut res = Response::from_string("{\"error\":\"Endpoint removed\"}").with_status_code(404);
             let content_type = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
             res = res.with_header(content_type);
             res

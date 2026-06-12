@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert, FlatList, TextInput, Platform, Modal, Animated } from 'react-native';
 import { router } from 'expo-router';
-import { useDatabaseSync } from '../src/hooks/useDatabaseSync';
+import { useDatabaseSync, Document as AppDocument } from '../src/hooks/useDatabaseSync';
 import { db } from '../src/database/schema';
 import { RustParserBridge } from '../src/native/RustParserBridge';
 
@@ -60,7 +60,7 @@ export default function LibraryScreen() {
 
   const filteredDocuments = useMemo(() => {
     if (!searchQuery) return documents;
-    return documents.filter(doc => 
+    return documents.filter((doc: AppDocument) => 
       (doc.title && doc.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (doc.author && doc.author.toLowerCase().includes(searchQuery.toLowerCase()))
     );

@@ -155,14 +155,5 @@ if (RUN_INTEGRATION_TESTS)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     # Specific integration validation tests mapping
-    add_test(
-        NAME SyntheticValidationTest
-        COMMAND "${CARGO_EXE}" test --test e2e_synthetic_validation ${CARGO_FEATURE_FLAGS}
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
-    add_test(
-        NAME IngestionIntegrationTest
-        COMMAND "${CARGO_EXE}" test --test e2e_integration_test ${CARGO_FEATURE_FLAGS}
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+    # Note: tests referencing delineator were refactored into agent_harness
 endif()

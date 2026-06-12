@@ -42,18 +42,11 @@ To parse and ingest raw documents (e.g. `Research Notes.pdf`) into a structured 
 cmake --build build --target CargoTests
 ```
 
-This test generates a pre-populated SQLite database at `rust_core/parser/target/test_artifacts/test_corpus.db` containing the parsed semantic AST blocks and sections of the PDF.
+This test generates a pre-populated SQLite database at `test_artifacts/test_dbs/e2e_integration/test_corpus.db` containing the parsed semantic AST blocks and sections of the PDF.
 
 ### 3. Run the Gateway Database Server
 
-The React Native Expo Web build runs inside the web browser sandbox and cannot access the local filesystem database directly. We host the SQLite database on a lightweight, local CORS-compliant HTTP gateway.
-
-```bash
-# Start the desktop database server gateway
-cmake --build build --target start-desktop-server
-```
-
-The gateway server starts at `http://localhost:8080`.
+The React Native Expo Web build runs inside the web browser sandbox and cannot access the local filesystem database directly. You can specify a custom database file to be served by the gateway by setting the `SERVED_DB_PATH` environment variable before starting the desktop server (e.g., `$env:SERVED_DB_PATH="test_artifacts/test_dbs/e2e_synthetic/synthetic_test.db"; cmake --build build --target start-desktop-server`). If not provided, it will serve an empty `llm_pdf_reader.db` production database where you can manually add PDFs. The gateway server starts at `http://localhost:8080`.
 - **Database Endpoint**: `http://localhost:8080/db` serves the raw SQLite binary.
 - **REST Endpoints**: `/parse`, `/inference`, `/delineate`, `/similarity` are available for layout and model actions.
 
@@ -83,7 +76,7 @@ To run all automated test suites uniformly across the repository (Cargo workspac
 ```bash
 # Navigate to the build directory and run tests
 cd build
-ctest --output-on-failure
+ctest -C Debug --output-on-failure
 ```
 
 ### Run Specific Test Suites

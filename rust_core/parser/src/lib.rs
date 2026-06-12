@@ -6,12 +6,11 @@ use std::path::Path;
 use std::fs::{self, File};
 use std::io::Write;
 use sha2::{Digest, Sha256};
-use pdfium_render::prelude::{PdfPageObjectsCommon, PdfPageObjectCommon};
+use pdfium_render::prelude::PdfPageObjectsCommon;
 
-// Force linking delineator FFI symbols in static library builds
-#[allow(unused_imports)]
-use delineator as _;
-
+// Force linking agent_harness FFI symbols in static library builds
+// #[allow(unused_imports)]
+// use agent_harness::agent_step_ffi;
 pub mod layout_engine;
 pub mod image_extractor;
 
@@ -223,7 +222,7 @@ impl PdfExtractor for RealPdfExtractor {
         // 5. Image Extraction and Image-Caption boundary checking
         let pdf_path = Path::new(&self.pdf_path);
         let parent_dir = pdf_path.parent().unwrap_or_else(|| Path::new("."));
-        let output_dir = parent_dir.join("images");
+        let output_dir = parent_dir.to_path_buf();
         
         let extracted_images = image_extractor::ImageExtractor::extract_images_from_page(
             &page, &doc, &lopdf_doc, page_number, page_width, page_height, &output_dir
