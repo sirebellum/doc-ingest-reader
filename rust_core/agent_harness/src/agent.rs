@@ -1,8 +1,6 @@
 use anyhow::Result;
-use crate::tools::{AgentDatabases, AgentTool, ExecuteAgentSQL, QueryContentDB, InsertAgentSection, InsertAgentBlock, ParsingComplete, AskHuman};
-use crate::migration::migrate_agent_data_to_content_db;
-use crate::prompt::AGENT_SYSTEM_PROMPT;
-use serde_json::Value;
+use crate::tools::{AgentDatabases, AgentTool, QueryAgentDB, CreateNode, LinkNodes, AskHuman, ParsingComplete};
+use crate::migration::migrate_agent_to_content;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AgentStatus {
@@ -22,18 +20,17 @@ pub struct AgentState {
 impl AgentState {
     pub fn new(dbs: AgentDatabases) -> Self {
         let tools: Vec<Box<dyn AgentTool>> = vec![
-            Box::new(ExecuteAgentSQL),
-            Box::new(QueryContentDB),
-            Box::new(InsertAgentSection),
-            Box::new(InsertAgentBlock),
-            Box::new(ParsingComplete),
+            Box::new(QueryAgentDB),
+            Box::new(CreateNode),
+            Box::new(LinkNodes),
             Box::new(AskHuman),
+            Box::new(ParsingComplete),
         ];
         
-        // Ensure system prompt is logged in conversation history (mock start)
+        let id = uuid::Uuid::new_v4().to_string();
         let _ = dbs.agent_db.execute(
-            "INSERT INTO agent_conversation_history (role, content) VALUES ('system', ?1)",
-            rusqlite::params![AGENT_SYSTEM_PROMPT]
+            "INSERT INTO agent_context (id, session_id, role, content) VALUES (?1, ?2, 'system', 'Agent Initialized')",
+            rusqlite::params![id, "session_1"]
         );
         
         Self {
@@ -44,15 +41,14 @@ impl AgentState {
         }
     }
 
-    /// Appends a message to the agent's conversation history
     fn append_history(&self, role: &str, content: &str) {
+        let id = uuid::Uuid::new_v4().to_string();
         let _ = self.databases.agent_db.execute(
-            "INSERT INTO agent_conversation_history (role, content) VALUES (?1, ?2)",
-            rusqlite::params![role, content]
+            "INSERT INTO agent_context (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, "session_1", role, content]
         );
     }
 
-    /// Primary ReAct execution loop step.
     pub fn step(&mut self) -> Result<AgentStatus> {
         if self.status != AgentStatus::Running {
             return Ok(
@@ -65,42 +61,21 @@ impl AgentState {
             );
         }
 
-        // Retrieve full conversation history (up to last 100 turns for safety)
-        let mut stmt = self.databases.agent_db.prepare(
-            "SELECT role, content FROM agent_conversation_history ORDER BY id ASC LIMIT 100"
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(format!("{}: {}", row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        
-        let mut prompt_context = String::new();
-        for row in rows {
-            if let Ok(msg) = row {
-                prompt_context.push_str(&msg);
-                prompt_context.push('\n');
-            }
-        }
-        
-        prompt_context.push_str("\nGenerate your next tool call as a JSON block.");
-
-        // Here we would call the LLM: 
-        // let output_str = inference::run_local_inference("agent-session", &prompt_context)?;
-        // For scaffold purposes, we simulate LLM output. In production, connect this to `inference::run_local_inference`.
-        let llm_output = "{\"tool\": \"ParsingComplete\", \"args\": {}}".to_string(); // Mocked output
-        
+        // Mock LLM generation for scaffolding.
+        // It would read from agent_context, call local model, and generate JSON.
+        let llm_output = "{\"tool\": \"ParsingComplete\", \"args\": {}}".to_string();
         self.append_history("assistant", &llm_output);
 
-        // Parse tool call with robust error handling
         let json_start = llm_output.find('{');
         let json_end = llm_output.rfind('}');
-        
+
         if let (Some(start), Some(end)) = (json_start, json_end) {
             if start < end {
                 let json_slice = &llm_output[start..=end];
-                match serde_json::from_str::<Value>(json_slice) {
+                match serde_json::from_str::<serde_json::Value>(json_slice) {
                     Ok(parsed) => {
                         let tool_name = parsed.get("tool").and_then(|v| v.as_str()).unwrap_or("");
-                        let args = parsed.get("args").unwrap_or(&Value::Null);
+                        let args = parsed.get("args").unwrap_or(&serde_json::Value::Null);
                         let args_str = args.to_string();
 
                         if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
@@ -110,7 +85,11 @@ impl AgentState {
                                     self.failed_tool_calls = 0; // Reset
                                     
                                     if tool_name == "ParsingComplete" {
-                                        let _ = migrate_agent_data_to_content_db(&self.databases.agent_db, &self.databases.content_db);
+                                        let _ = migrate_agent_to_content(
+                                            &self.databases.agent_db_path,
+                                            &self.databases.content_db_path,
+                                            &self.databases.document_id
+                                        );
                                         self.status = AgentStatus::Completed;
                                     } else if tool_name == "AskHuman" {
                                         self.status = AgentStatus::WaitingForHuman(args_str);
@@ -135,7 +114,7 @@ impl AgentState {
                     }
                 }
             } else {
-                self.append_history("tool", "System Error: No valid JSON tool call found. Did you forget to output the JSON block?");
+                self.append_history("tool", "System Error: No valid JSON tool call found.");
                 self.failed_tool_calls += 1;
             }
         } else {

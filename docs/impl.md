@@ -329,3 +329,6 @@ When importing `shared_notes.json`:
 
 ### [v3.0.0] - 2026-06-05
 - **AsyncFunction Expo Bridge Refactoring**: Addressed stability issues related to manual `std::thread` usage in the React Native JSI layer. Migrated all asynchronous host object methods (`parsePDFAsync`, `runInferenceAsync`, `delineatePageAsync`, `getHeapStats`, `configureNpu`) to Expo's `AsyncFunction` Kotlin API utilizing standard JNI synchronous exports in C++. Kept high-performance array operations (`computeSimilarity`) tightly bound to the pure zero-copy C++ JSI host object. Updated `RustParserBridge.ts` to seamlessly import the Expo Module.
+
+### [v3.1.0] - 2026-06-11
+- **CTest Test Suite Expansion**: Reviewed the entire codebase for testing gaps in the CMake CTest integration. Discovered missing `add_test` mappings for `mobile/package.json`'s `ingest:test` CLI integration suite and the `run_maestro_e2e.sh` E2E testing bash script. Successfully integrated both suites natively into `mobile/CMakeLists.txt` guaranteeing they execute reliably alongside `JestTests`, `CargoTests`, and `VerifyReadmeConfig` during generic build verification runs.

@@ -196,4 +196,12 @@ These variables are passed to CMake during configuration (`cmake -B build -DOPTI
 * `-DBUILD_ANDROID_APK=ON/OFF` (Default: `OFF`): Cross-compiles for Android architectures, resolving NDK toolchain compilers automatically.
 * `-DBUILD_IOS_FRAMEWORK=ON/OFF` (Default: `OFF`): Prepares Objective-C++ dynamic targets for CocoaPods / EAS iOS builds.
 * `-DLLAMA_NATIVE=ON/OFF` (Default: `OFF`): Links upstream `llama.cpp` using local cache directories.
-* `-DRUN_INTEGRATION_TESTS=ON/OFF` (Default: `ON`): Sets up Cargo and Jest test wrappers under `ctest`.
+
+
+---
+
+## 5. Change Log & Addendums
+
+### [v1.9.0] - Agentic Pass 2 Architecture Restoration
+- **Agentic Pass 2 Architecture**: Refactored the Pass 2 orchestrator within the `agent_harness` crate. The system continues to use a ReAct loop but now correctly aligns its `agent_scratch.db` ephemeral initialization with the official Drizzle schema (`0000_fresh_newton_destine.sql`) from the React Native client. We enforce a dual-database boundary using atomic `ATTACH DATABASE` transactions within `migration.rs`.
+- **Multi-Format Extensibility**: Integrated unified `ASTNode` generation in `parser/src/lib.rs` and added a clean `parse_document` router, providing scaffolded entry points for Markdown, HTML, and EPUB structures alongside the existing PDF layout engine.

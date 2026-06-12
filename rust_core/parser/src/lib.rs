@@ -1093,3 +1093,13 @@ pub extern "C" fn free_rust_string(s: *mut std::os::raw::c_char) {
         }
     }
 }
+
+pub fn parse_document(local_path: &str, format: &str) -> Result<String> {
+    match format.to_lowercase().as_str() {
+        "pdf" => parse_pdf(local_path),
+        "markdown" | "md" => parse_markdown(local_path),
+        "html" | "htm" => parse_html(local_path),
+        "epub" => parse_epub(local_path),
+        _ => Err(anyhow::anyhow!("Unsupported format: {}", format)),
+    }
+}

@@ -55,6 +55,25 @@ add_test(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+# 4a. Ingest CLI validation testing
+add_test(
+    NAME IngestCLI_Test
+    COMMAND "${NPM_EXE}" run ingest:test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+# 4b. Maestro E2E Integration Suite
+find_program(BASH_EXE bash)
+if (BASH_EXE)
+    add_test(
+        NAME MaestroE2ETests
+        COMMAND "${BASH_EXE}" "scripts/run_maestro_e2e.sh" "${NODE_EXE}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+else()
+    message(WARNING "bash executable not found, skipping Maestro E2E test registration.")
+endif()
+
 # 5. Android APK Target
 if (BUILD_ANDROID_APK)
     if (WIN32)

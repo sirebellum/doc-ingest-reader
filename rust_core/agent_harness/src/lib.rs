@@ -12,13 +12,14 @@ pub mod ingest;
 
 
 #[no_mangle]
-pub extern "C" fn agent_init_ffi(agent_path: *const c_char, content_path: *const c_char) -> *mut c_void {
-    if agent_path.is_null() || content_path.is_null() {
+pub extern "C" fn agent_init_ffi(agent_path: *const c_char, content_path: *const c_char, doc_id: *const c_char) -> *mut c_void {
+    if agent_path.is_null() || content_path.is_null() || doc_id.is_null() {
         return std::ptr::null_mut();
     }
     
     let agent_path_str = unsafe { std::ffi::CStr::from_ptr(agent_path).to_string_lossy().into_owned() };
     let content_path_str = unsafe { std::ffi::CStr::from_ptr(content_path).to_string_lossy().into_owned() };
+    let doc_id_str = unsafe { std::ffi::CStr::from_ptr(doc_id).to_string_lossy().into_owned() };
 
     let content_conn = match rusqlite::Connection::open(&content_path_str) {
         Ok(c) => c,
@@ -39,6 +40,9 @@ pub extern "C" fn agent_init_ffi(agent_path: *const c_char, content_path: *const
     let dbs = tools::AgentDatabases {
         agent_db: agent_conn,
         content_db: content_conn,
+        agent_db_path: agent_path_str,
+        content_db_path: content_path_str,
+        document_id: doc_id_str,
     };
 
     let state = Box::new(agent::AgentState::new(dbs));

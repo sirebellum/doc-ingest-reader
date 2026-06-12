@@ -19,16 +19,16 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
     let mut current_word_count = 0;
     let mut sequence_order = 0;
 
-    let mut insert_block = |content: &str| -> Result<()> {
+    let mut insert_block = |content: &str, token_count: i64| -> Result<()> {
         let id = format!("raw-{}-{}", extraction.chunk_index, sequence_order);
         let doc_id = &extraction.document_id;
         
-        // We insert this into `agent_blocks` as un-explored raw text.
+        // We insert this into `pass1_chunks` as un-explored raw layout text.
         // The LLM will later read this and restructure it.
         db.execute(
-            "INSERT INTO agent_blocks (id, section_id, document_id, block_type, content, sort_order, sequence_order, is_explored) 
-             VALUES (?1, NULL, ?2, 'raw_text', ?3, ?4, ?5, 0)",
-            rusqlite::params![id, doc_id, content, sequence_order, sequence_order]
+            "INSERT INTO pass1_chunks (id, document_id, raw_layout_text, chunk_token_count, overlap_buffer) 
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+            rusqlite::params![id, doc_id, content, token_count]
         )?;
         sequence_order += 1;
         Ok(())
@@ -40,7 +40,7 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
         if current_word_count + words_in_para > max_words {
             if !current_chunk.is_empty() {
                 // Flush current
-                insert_block(&current_chunk.join("\n\n"))?;
+                insert_block(&current_chunk.join("\n\n"), current_word_count as i64)?;
                 current_chunk.clear();
                 current_word_count = 0;
             }
@@ -54,7 +54,7 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
                 for sentence in sentences {
                     let s_words = sentence.split_whitespace().count();
                     if p_words + s_words > max_words && !p_chunk.is_empty() {
-                        insert_block(&p_chunk.join(". "))?;
+                        insert_block(&p_chunk.join(". "), p_words as i64)?;
                         p_chunk.clear();
                         p_words = 0;
                     }
@@ -77,7 +77,7 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
     }
 
     if !current_chunk.is_empty() {
-        insert_block(&current_chunk.join("\n\n"))?;
+        insert_block(&current_chunk.join("\n\n"), current_word_count as i64)?;
     }
 
     Ok(())

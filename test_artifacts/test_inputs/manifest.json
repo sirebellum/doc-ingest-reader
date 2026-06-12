@@ -1,0 +1,32 @@
+{
+  "files": [
+    {
+      "filename": "linked.pdf",
+      "title": "Linked Document",
+      "author": "Test Author",
+      "description": "a large pdf with hyperlinks correctly inserted to navigate the document",
+      "source_type": "pdf"
+    },
+    {
+      "filename": "unlinked.pdf",
+      "title": "Unlinked Document",
+      "author": "Test Author",
+      "description": "a document very similar to linked but without hyperlinks",
+      "source_type": "pdf"
+    },
+    {
+      "filename": "notes.pdf",
+      "title": "Research Notes",
+      "author": "Test Author",
+      "description": "a short, text only document",
+      "source_type": "pdf"
+    },
+    {
+      "filename": "paper.pdf",
+      "title": "Research Paper",
+      "author": "Test Author",
+      "description": "a research paper with images and dual column layout",
+      "source_type": "pdf"
+    }
+  ]
+}

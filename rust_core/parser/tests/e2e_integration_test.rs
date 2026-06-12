@@ -6,7 +6,7 @@ use contracts::ExtractionChunk;
 use agent_harness::agent::AgentState;
 use agent_harness::tools::AgentDatabases;
 use agent_harness::ingest::ingest_chunk_to_agent_db;
-use agent_harness::migration::migrate_agent_data_to_content_db;
+use agent_harness::migration::migrate_agent_to_content;
 use synthetic_gen::{SyntheticInput, SyntheticBlock, SyntheticSection, generate_synthetic_pdf};
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -172,29 +172,9 @@ fn test_e2e_ingestion_pipeline() {
     // 1. Create target artifacts directory
     let artifacts_dir_raw = Path::new("../../test_artifacts/e2e_integration_test"); fs::create_dir_all(&artifacts_dir_raw).expect("Failed to create dir"); let artifacts_dir_pathbuf = artifacts_dir_raw.canonicalize().unwrap(); let artifacts_dir = artifacts_dir_pathbuf.as_path();
     
-
-    let pdf_path_buf = artifacts_dir.join("Research Notes.pdf"); let pdf_path_str = pdf_path_buf.to_str().unwrap();
-    
-    // Generate synthetic PDF instead of relying on external files
-    let input = SyntheticInput {
-        title: "Research Notes".to_string(),
-        table_of_contents: vec![],
-        strip_index_from_pdf: false,
-        sections: vec![
-            SyntheticSection {
-                section_id: "sec-1".to_string(),
-                heading: "Chapter 1: Synthesis".to_string(),
-                blocks: vec![
-                    SyntheticBlock {
-                        id: "blk-1".to_string(),
-                        block_type: "paragraph".to_string(),
-                        content: "This is a paragraph representing research notes.".to_string(),
-                    }
-                ],
-            }
-        ],
-    };
-    generate_synthetic_pdf(pdf_path_str, &input).expect("Failed to generate synthetic PDF");
+    let pdf_path_raw = Path::new("../../test_artifacts/test_inputs/paper.pdf");
+    let pdf_path_buf = pdf_path_raw.canonicalize().expect("Failed to canonicalize paper.pdf path");
+    let pdf_path_str = pdf_path_buf.to_str().unwrap();
     let pdf_path = pdf_path_str;
     assert!(Path::new(pdf_path).exists(), "Sample PDF not found at: {}", pdf_path);
 
@@ -256,13 +236,21 @@ fn test_e2e_ingestion_pipeline() {
     ).expect("Failed to insert document");
     
     agent_conn.execute(
-        "INSERT INTO agent_documents (id, corpus_id, title, author, source_type, sha256_hash, storage_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params![doc_id.clone(), corpus_uuid, "Research Notes", "Test Author", "pdf", sha2_hash(&pdf_path), pdf_path],
+        "INSERT INTO corpora (id, name, description) VALUES (?, ?, ?)",
+        params!["corp_1", "Test Corpus", "Desc"],
+    ).expect("Failed to insert corpus");
+
+    agent_conn.execute(
+        "INSERT INTO documents (id, corpus_id, title, author, source_type, sha256_hash, storage_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        params![doc_id.clone(), "corp_1", "Test Doc", "Author", "pdf", "testhash", pdf_path],
     ).expect("Failed to insert agent document");
     
     let dbs = AgentDatabases {
         agent_db: agent_conn,
         content_db: content_conn,
+        agent_db_path: agent_db_path.to_string_lossy().into_owned(),
+        content_db_path: content_db_path.to_string_lossy().into_owned(),
+        document_id: doc_id.clone(),
     };
     
     let state = AgentState::new(dbs);
@@ -277,19 +265,19 @@ fn test_e2e_ingestion_pipeline() {
     
     // Simulate some mock LLM blocks by directly inserting into agent_db
     // because inference in tests with dummy model might not output proper JSON
+    let sec_id = "sec-1".to_string();
     state.databases.agent_db.execute(
-        "INSERT INTO agent_sections (id, document_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?)",
-        params!["sec-1", doc_id, "Chapter 1: Local Inference", 1, 1],
+        "INSERT INTO sections (id, document_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?)",
+        params![sec_id.clone(), doc_id.clone(), "Introduction", 1, 0],
     ).unwrap();
     
     state.databases.agent_db.execute(
-        "INSERT INTO agent_blocks (id, section_id, document_id, block_type, content, sort_order, sequence_order, is_explored) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        params!["blk-1", "sec-1", doc_id, "paragraph", r#"{"text": "This is a paragraph"}"#, 1, 1, 1],
+        "INSERT INTO blocks (id, section_id, document_id, block_type, content, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+        params![uuid::Uuid::new_v4().to_string(), sec_id.clone(), doc_id.clone(), "paragraph", "This is an overview of the system architecture.", 0],
     ).unwrap();
     
     // Migrate to content db
-    migrate_agent_data_to_content_db(&state.databases.agent_db, &state.databases.content_db).expect("Failed migration");
-    
+    let _ = migrate_agent_to_content(state.databases.agent_db_path.as_str(), state.databases.content_db_path.as_str(), &doc_id);    
     let content_conn = &state.databases.content_db;
     
     // Assert 1: Automated database triggers populated plain-text blocks_fts correctly
