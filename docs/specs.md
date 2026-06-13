@@ -102,14 +102,14 @@ CREATE TABLE sections (
 ```
 
 ### 4. Blocks (Paragraphs/Tables/Figures)
-The atomic elements of content. The `content` column contains parsed and sanitized XHTML content for direct rendering.
+The atomic elements of content. The `content` column contains serialized `ASTNode` JSON payloads for native cross-platform rendering.
 ```sql
 CREATE TABLE blocks (
     id TEXT PRIMARY KEY,
     section_id TEXT REFERENCES sections(id) ON DELETE CASCADE,
     document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
     block_type TEXT DEFAULT 'paragraph' NOT NULL, -- 'paragraph', 'table', 'code', 'image', 'quote'
-    content TEXT NOT NULL, -- Sanitized HTML content
+    content TEXT NOT NULL, -- Serialized ASTNode JSON Schema
     sort_order INTEGER NOT NULL,
     token_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -158,7 +158,18 @@ CREATE TABLE block_tags (
 );
 ```
 
-### 8. Blocks FTS5 Virtual Table (Clean Plain-Text Search Index)
+### 8. Layout Height Cache
+Maintains a pre-computed cache of block render heights based on device dimensions to ensure 120 FPS Shopify FlashList recycling without UI thrashing.
+```sql
+CREATE TABLE layout_height_cache (
+    block_id TEXT REFERENCES blocks(id) ON DELETE CASCADE,
+    device_width INTEGER NOT NULL,
+    calculated_height REAL NOT NULL,
+    PRIMARY KEY (block_id, device_width)
+);
+```
+
+### 9. Blocks FTS5 Virtual Table (Clean Plain-Text Search Index)
 Decoupled SQLite FTS5 table indexing only raw plain-text content (HTML tags stripped) to prevent tag matching pollution. Database triggers automate synchronization.
 ```sql
 CREATE VIRTUAL TABLE blocks_fts USING fts5(
@@ -167,7 +178,7 @@ CREATE VIRTUAL TABLE blocks_fts USING fts5(
 );
 ```
 
-### 9. Processing Jobs (Background LLM State Tracking)
+### 10. Processing Jobs (Background LLM State Tracking)
 Tracks long-running ingestion jobs to provide progress tracking for the frontend and prevent data loss.
 ```sql
 CREATE TABLE processing_jobs (
@@ -180,7 +191,7 @@ CREATE TABLE processing_jobs (
 );
 ```
 
-### 10. Job Chunks (Chunk Resiliency)
+### 11. Job Chunks (Chunk Resiliency)
 Holds the individual text chunks queued for local LLM processing. This ensures that if the app or local model crashes, progress is saved per-chunk and can be resumed gracefully.
 ```sql
 CREATE TABLE job_chunks (

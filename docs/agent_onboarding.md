@@ -18,7 +18,7 @@ The system is split into two primary layers: a high-performance native engine wr
                                        v
                     +------------------------------------+
                     |             rust_core              |
-                    | (parser | delineator | inference)  |
+                    | (parser | agent_harness | inference) |
                     +------------------+-----------------+
                                        |
                                        +--> lopdf & pdfium-render (Pass 1)
@@ -27,8 +27,8 @@ The system is split into two primary layers: a high-performance native engine wr
 
 ### `rust_core/` (Native Engine)
 The native engine consists of Cargo-managed crates compiled to run locally on the host machine or cross-compiled for mobile platforms:
-* **`parser` (Pass 1 - Visual Extraction)**: Coordinates layout boundary mapping. It reads raw object streams via `lopdf` (retaining text drawing operations `TJ` and `Tj` for precise text boundaries) and calculates geometric bounding boxes using `pdfium-render` scaled to PostScript points (1/72 inch). Bounding boxes are measured relative to the page dimensions from top-left (0,0). Sandboxed image bytes are extracted, decompressed, saved as Sandboxed PNGs (`documents/images/[sha256_hash]_[image_id].png`), and referenced in SQLite as dynamic portable `local-asset://[image_id].png` URIs.
-* **`delineator` (Pass 2 - Semantic Structuring)**: Responsible for partitioning raw text and coordinate layout data into semantic block elements (`ASTNode`) and section hierarchies (Table of Contents) using LLM structuring models. It coordinates the 100-token (3-5 sentences) semantic overlap buffer for page boundary continuity.
+* **`parser` (Pass 1 - Visual Extraction)**: Coordinates layout boundary mapping. It reads raw object streams via `lopdf` (retaining text drawing operations `TJ` and `Tj` for precise text boundaries) and calculates geometric bounding boxes using `pdfium-render` scaled to PostScript points (1/72 inch). Sandboxed image bytes are extracted, decompressed, saved as Sandboxed PNGs (`documents/images/[sha256_hash]_[image_id].png`), and referenced in SQLite as dynamic portable `local-asset://[image_id].png` URIs. It directly routes structured formats (EPUB, HTML, Markdown) to `ASTNode` JSON schemas, bypassing the LLM chunking pipeline entirely.
+* **`agent_harness` (Pass 2 - Semantic Structuring)**: Replaces the linear delineator pipeline. Responsible for partitioning raw PDF layout data into semantic block elements (`ASTNode`) and section hierarchies using a stateful ReAct loop. It coordinates the 100-token semantic overlap buffer for page boundary continuity and executes type-safe SQLite insertions over C FFI.
 * **`inference` (llama.cpp Offline Engine)**: Embeds `llama.cpp` bindings for zero-cost, local offline inference on-device (linked statically via the `llama_native` feature flag). It targets Apple's CoreML / Neural Engine via Metal shaders (iOS) and Qualcomm Snapdragon/MediaTek NPUs via NNAPI/OpenCL (Android). Restricts RAM footprints using 4-bit quantization (`Q4_K_M` or similar) to stay below $\le 1.8\text{ GB}$ to prevent OS-level Out-of-Memory (OOM) background terminations.
 * **`desktop_server` (Developer HTTP Gateway)**: A lightweight `tiny_http` server hosting native parser, inference, and vector similarities. Exposes REST endpoints (`/parse`, `/inference`, `/delineate`, `/similarity`) and serves the SQLite database on `GET /db` to enable web-platform simulator execution without native mobile emulators.
 
@@ -114,7 +114,7 @@ To isolate plain-text from JSON AST formatting strings (avoiding search hits on 
 
 ## 3. Production Architecture Boundaries & Critical Guardrails
 
-To maintain peak performance and avoid regression bottlenecks, developers must follow these six guardrails:
+To maintain peak performance and avoid regression bottlenecks, developers must follow these seven guardrails:
 
 ### 1. FlashList Bridge Serialization Volumetrics
 * **Risk**: Large blocks freeze the bridge during serialization and trigger layout recalculations in recycled FlashList cells, introducing micro-stutters.
@@ -145,6 +145,10 @@ To maintain peak performance and avoid regression bottlenecks, developers must f
 ### 6. Mock Storage Degradation
 * **Risk**: Unit tests running against browser SQL mocks pass silently but fail on native devices.
 * **Warning**: The web-based SQL mock environment (when `NODE_ENV === 'test'`) operates as a basic in-memory JS structure. It does NOT enforce foreign keys, `ON DELETE CASCADE` cascades, multi-table FTS5 triggers, or atomic transaction locks. Always run integration tests on the native target or CORS gateway to validate database features.
+
+### 7. Strict Error Handling Policies
+* **Risk**: Thread panics in the Rust engine crash the entire mobile application ungracefully via the JSI bridge.
+* **Rule**: `unwrap()`, `expect()`, and `panic!()` are strictly prohibited in the execution pipelines, DB initialization, and ReAct loops. Always rely on idiomatic Rust `Result<T, E>` vectors. The parser and agent loops must catch errors cleanly and yield stringified "System Error" messages to allow the LLM to self-correct without crashing the thread.
 
 ---
 
