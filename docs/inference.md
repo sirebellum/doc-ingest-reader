@@ -1,79 +1,47 @@
 # Inference Subsystem (`rust_core/inference`)
 
-The `inference` sub-crate manages offline inference execution and manages the flexible routing matrix that lets users direct LLM processing to local models, local-network servers, or cloud endpoints.
+The `inference` crate manages the AI execution layer of the Document-to-Reader pipeline. It does not orchestrate the high-level logic or ReAct loops (which is handled by `agent_harness`); rather, it provides the low-level bindings, network connectors, and hardware-accelerated drivers required to prompt language models and retrieve structured responses.
 
 ---
 
-## 1. Local Mobile Inference (llama.cpp)
+## 1. Flexible Pre-Ingestion Routing Matrix
 
-To run offline, private, zero-cost processing directly on a user's mobile device, the application incorporates embedded `llama.cpp` hooks into `rust_core`.
+Recognizing that users have different needs regarding battery life, processing speed, and absolute privacy, the `inference` module implements a flexible routing matrix. When the `agent_harness` requests an LLM completion, this crate routes the prompt through one of three execution layers:
 
-```mermaid
-graph LR
-    A[JSI Call] --> B[rust_core Bridge]
-    B --> C[inference C++ / llama.cpp]
-    C -->|Accelerators| D[Apple Neural Engine / Android NPU]
-    C -->|Model Weight Map| E[GGML / GGUF File Sandbox]
-```
-
-### Hardware Acceleration Matrix
-- **iOS Systems**: Hooks into Apple's CoreML and Apple Neural Engine (ANE) via native Metal performance shaders.
-- **Android Systems**: Targets Qualcomm Snapdragon DSPs, MediaTek APUs, and general ARM NEON registers using standard OpenCL / NNAPI execution layers.
-- **Memory Optimization**: Leverages strict 4-bit (e.g. `Q4_K_M`) quantization formats. Restricts RAM footprints to $\le 1.8\text{ GB}$ to ensure background processes are not preemptively terminated by the host mobile operating system's out-of-memory (OOM) managers.
+| Routing Option | Privacy Level | Underlying Execution Layer |
+| --- | --- | --- |
+| **Local Inference** | **100% Private & Offline** | Embedded `llama.cpp` static library linked directly in the Rust core. Runs strictly on-device with zero token costs. |
+| **Local Network Link** | **Local Network Private** | Wi-Fi link routing structured payloads to local developer setups (e.g., Ollama via `/api/generate` or LM Studio via `/v1/chat/completions`) with transaction retry fallbacks. |
+| **BYOK Cloud Fallback** | **Cloud-Dependent** | *Bring Your Own Key* API connectors routing JSON payloads directly to Google Gemini, Anthropic Claude, or OpenAI GPT. API Keys are passed securely via the JSI bridge from the device's Keychain/Keystore. |
 
 ---
 
-## 2. LLM Pre-Ingestion Routing Matrix
+## 2. On-Device Execution Engine (`llama.cpp`)
 
-The user is empowered to balance local privacy, processing speed, and device battery conservation via a dynamic pre-ingestion dashboard:
+For the primary offline route, the crate utilizes embedded native bindings to `llama.cpp` to execute generative tasks directly on mobile hardware.
 
-| Option | Speed (100 Pages) | Cost | Privacy | Host |
-| :--- | :--- | :--- | :--- | :--- |
-| **Local Inference** | ~45 - 60 Minutes | $0 | 100% Private (Offline) | On-Device llama.cpp |
-| **Local Network Link** | ~15 - 20 Minutes | $0 | Local Network (Private) | Wi-Fi LM Studio / Ollama |
-| **BYOK Cloud Fallback** | ~5 - 10 Minutes | Pay-per-Token | Cloud Server | Gemini, Claude, or OpenAI |
+* **Hardware Acceleration Hooks**:
+* *iOS*: Hooks into Apple's CoreML and Apple Neural Engine (ANE) via native Metal performance shaders.
+* *Android*: Targets Qualcomm Snapdragon DSPs, MediaTek APUs, and general ARM NEON registers using standard OpenCL / NNAPI execution layers.
 
----
 
-## 3. Wi-Fi Local Network Connection
-
-- **Configuration**: The app lets users input local IP addresses and ports directly (e.g., `http://192.168.1.50:11434` or `http://192.168.1.50:1234`).
-- **Endpoint Standards**:
-  - Ollama routes use the `/api/generate` and `/api/chat` schemas.
-  - LM Studio routes map to `/v1/chat/completions` API patterns.
-- **Graceful Fallbacks**: If network packages timeout or drops occur during ingestion, the scheduler caches completed page payloads in SQLite and resumes immediately upon re-connection.
+* **Strict Memory Optimization**: To prevent the host mobile operating system (OOM killers) from terminating the background ingestion process, the engine enforces strict 4-bit quantization formats (e.g., `Q4_K_M`). It artificially restricts the RAM footprint to $\le 1.8\text{ GB}$, optimizing for models like `Gemma-3-1b` or quantized `Phi-3`.
 
 ---
 
-## 4. BYOK Cloud Connection
+## 3. Resilient Model Downloader (`downloader.rs`)
 
-- **Protocol**: Fully offline-first design allows cloud fallback *only* when the user inputs their own API tokens (Bring Your Own Key).
-- **Supported Providers**:
-  - **Google Gemini**: Integrates with system API endpoints for structured output formatting.
-  - **Anthropic Claude**: Leverages tool-use or system prompt structuring.
-  - **OpenAI GPT**: Leverages standard JSON schema mode.
-- **Storage**: Keys are stored securely in the device's native hardware keystore (iOS Keychain / Android Keystore) via `react-native-quick-crypto` bindings.
+To support the fully offline LLM pipeline, the application must be able to fetch GGUF model weights locally. The `inference` crate implements a highly resilient model downloader utility built to interact with the Hugging Face hub.
+
+* **Atomic File Protection**: Uses atomic lock-files during the download phase to prevent file corruption if the app is closed or crashes mid-download.
+* **Network Resiliency**: Implements range-header HTTP requests, allowing the engine to seamlessly pause and resume massive GGUF binary downloads if the user drops Wi-Fi connection or background execution is suspended.
+* **Verification**: Executes cryptographic post-download checksum validations (SHA-256) to guarantee model integrity before loading it into neural memory.
 
 ---
 
-## 5. Change Log & Addendums
+## 4. Deterministic Output & Repair Loop
 
-### [v1.3.0] - 2026-05-28
-  - Implemented real-world static compiler configuration in `rust_core/inference/build.rs` using the `llama_native` feature flag for statically linking `libllama.a` on iOS and Android.
-  - Implemented dynamic fallback resilience: if `llama_native` is disabled, the system runs simulated mock blocks cleanly.
-  - Wired all missing JS-to-Rust JSI Promise operations (`resolve` / `reject`) inside `RustParserBridge.cpp` and `RustParserBridge.h`.
-  - Added new asynchronous native bridge APIs for `getHeapStats()` and `configureNpu(config)` to monitor RAM/NPU statistics.
-  - Designed `ModelDownloader` in `mobile/src/utils/modelDownloader.ts` to manage downloading Gemma-3-1b GGUF weights from Hugging Face into the Expo FileSystem.
-  - Created a custom Expo Config Plugin `withNativeLibraries.js` and configured `eas.json` profiles.
+Because the LLM's primary role is to generate valid JSON Abstract Syntax Trees (`ASTNode`) for the `dbs` module, the `inference` crate implements strict output formatting controls.
 
-### [v1.4.0] - 2026-06-03
-- **Deterministic Validation & Retry/Repair Loop**: Built-in deterministic structured output schema validation on the LLM results in `rust_core/inference/src/lib.rs`. Integrated a retry/repair loop utilizing `serde_json` to automatically attempt to parse and repair minor JSON structural deformities in LLM outputs, ensuring schema reliability.
-- **Unified JSON AST payload contracts**: Refactored inference payloads in `mobile/src/api/connector.ts` to expect JSON AST `content` structures instead of raw `html_content` blocks, matching the new type contracts.
-
-### [v1.5.0] - 2026-06-03
-- **Local Inference Integration with Pass 2 Delineator**: Integrated the `inference` library's local Gemma-3-1b offline GGUF processing with the new `delineator` crate. This allows running prompt-constrained Pass 2 layout parsing locally on-device. Added dynamic mock weights path existence checks (`dummy_model.gguf`) in tests to ensure robust unit test fallback execution without full GGUF load overhead.
-
-### [v1.6.0] - 2026-06-04
-- **Resilient Model Downloader**: Implemented a resilient downloader utility in `rust_core/inference/src/downloader.rs` designed to fetch quantized model GGUF weights from Hugging Face. Added targeted sandbox validation, atomic lock-file protection, chunked stream chunk reading, progress telemetry, and range-header resume fallbacks on network interruptions. Exposed FFI interfaces for mobile/desktop compilation targets.
-
-
+* **Grammar Constraints**: Applies strict JSON grammar rules to the local model's decoding sequence, mathematically forcing the model to only output tokens that form valid JSON.
+* **Retry & Repair Loop**: If an external cloud API or minor context hallucination results in a structurally deformed JSON payload, the crate utilizes a `serde_json` repair loop. It intercepts the payload, attempts to correct minor syntax deformities (like missing trailing brackets), or throws a typed `InferenceError` to the `agent_harness` to request a generation retry, ensuring database migrations never fail due to bad string parsing.

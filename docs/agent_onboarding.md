@@ -4,147 +4,58 @@ This document serves as the high-density reference manual for AI agents and huma
 
 ---
 
-## 1. Architectural System Topology
+## 1. Architectural System Topology (The Big Picture)
 
-The system is split into two primary layers: a high-performance native engine written in Rust and C++ (`rust_core`), and a cross-platform React Native mobile client (`mobile`) communicating via a zero-copy JSI bridge.
+The system is split into two primary layers: a high-performance native engine written in Rust and C++ (`rust_core`), and a cross-platform React Native mobile client (`mobile`). The frontend acts as a "thin client," delegating all heavy data processing, state management, and synchronization to the Rust core via a zero-copy JSI bridge.
+
+```text
+                    +------------------------------------------+
+                    |           React Native Client            |
+                    |   (Expo / FlashList / UI Presentation)   |
+                    +--------------------+---------------------+
+                                         |
+                                         | C++ JSI Bridge (Zero-Copy)
+                                         v
+                    +------------------------------------------+
+                    |            rust_core Workspace           |
+                    |                                          |
+                    |  [ contracts ] <--- Single Source of Truth
+                    |  [ dbs ]       <--- Dual-DB SQLite Mgr   |
+                    |  [ doc_sync ]  <--- BLE / Myers Merge    |
+                    |                                          |
+                    |  Pass 1: [ parser ]                      |
+                    |  Pass 2: [ agent_harness ] + [ inference]|
+                    +------------------------------------------+
 
 ```
-                    +------------------------------------+
-                    |        React Native Client         |
-                    |            (Expo SDK 50)           |
-                    +------------------+-----------------+
-                                       |
-                                       | JSI Bridge FFI
-                                       v
-                    +------------------------------------+
-                    |             rust_core              |
-                    | (parser | agent_harness | inference) |
-                    +------------------+-----------------+
-                                       |
-                                       +--> lopdf & pdfium-render (Pass 1)
-                                       +--> llama.cpp & GGUF (Pass 2)
-```
-
-### `rust_core/` (Native Engine)
-The native engine consists of Cargo-managed crates compiled to run locally on the host machine or cross-compiled for mobile platforms:
-* **`parser` (Pass 1 - Visual Extraction)**: Coordinates layout boundary mapping. It reads raw object streams via `lopdf` (retaining text drawing operations `TJ` and `Tj` for precise text boundaries) and calculates geometric bounding boxes using `pdfium-render` scaled to PostScript points (1/72 inch). Sandboxed image bytes are extracted, decompressed, saved as Sandboxed PNGs (`documents/images/[sha256_hash]_[image_id].png`), and referenced in SQLite as dynamic portable `local-asset://[image_id].png` URIs. It directly routes structured formats (EPUB, HTML, Markdown) to `ASTNode` JSON schemas, bypassing the LLM chunking pipeline entirely.
-* **`agent_harness` (Pass 2 - Semantic Structuring)**: Replaces the linear delineator pipeline. Responsible for partitioning raw PDF layout data into semantic block elements (`ASTNode`) and section hierarchies using a stateful ReAct loop. It coordinates the 100-token semantic overlap buffer for page boundary continuity and executes type-safe SQLite insertions over C FFI.
-* **`inference` (llama.cpp Offline Engine)**: Embeds `llama.cpp` bindings for zero-cost, local offline inference on-device (linked statically via the `llama_native` feature flag). It targets Apple's CoreML / Neural Engine via Metal shaders (iOS) and Qualcomm Snapdragon/MediaTek NPUs via NNAPI/OpenCL (Android). Restricts RAM footprints using 4-bit quantization (`Q4_K_M` or similar) to stay below $\le 1.8\text{ GB}$ to prevent OS-level Out-of-Memory (OOM) background terminations.
-* **`desktop_server` (Developer HTTP Gateway)**: A lightweight `tiny_http` server hosting native parser, inference, and vector similarities. Exposes REST endpoints (`/parse`, `/inference`, `/delineate`, `/similarity`) and serves the SQLite database on `GET /db` to enable web-platform simulator execution without native mobile emulators.
-
-### `mobile/src/` (Managed UI & Local Storage)
-The mobile application runs on Expo SDK 50/React Native:
-* **Directory Structure**:
-  * `mobile/src/database/`: SQLite schema initializations, Drizzle ORM migrations (`mobile/drizzle/`), and search indexing triggers.
-  * `mobile/src/native/`: React Native JSI bridge definitions and mock implementations for non-native environments (Web/Jest).
-  * `mobile/src/screens/`: Layout screens (Tablet 3-pane responsive grid vs Smartphone sliding drawer and Bottom Sheet configurations).
-  * `mobile/src/components/`: Performance cell renderers (Shopify FlashList block recycling) and visual block styling.
-* **Local Storage & Schema**: Relational database is managed locally via `expo-sqlite` and Drizzle ORM. Auto-migration checks run synchronously at startup.
-* **FTS5 Plain-Text Index**: Full-Text Search uses virtual tables and native SQLite FTS5 extension, with custom triggers extracting text recursively from AST JSON content to prevent XHTML/JSON formatting pollution.
-
-### `mobile/modules/` (The High-Speed JSI Bridge)
-* **Technology**: Local Expo Module (`mobile/modules/rust-parser-bridge` and C++ JNI exports `mobile/src/native/cpp/RustParserBridge.cpp`).
-* **JSI Host Object & Expo Module**: Asynchronous thread offloading (`parsePDFAsync`, `delineatePageAsync`, `runInferenceAsync`) is safely orchestrated via Expo's `AsyncFunction` Kotlin bindings. The pure C++ JSI host object registers only synchronous methods (`computeSimilarity`, `computeBatchSimilarities`) to avoid raw `std::thread` stability issues in React Native contexts.
-* **Hardware-Accelerated Math**: Bypasses JSI array serializations by obtaining direct pointers to `Float32Array` raw memory buffers. Computes cosine similarity synchronously with SIMD vectorization loops (`#pragma clang loop vectorize(enable)` / `#pragma GCC ivdep`), giving high-speed vector math performance directly in the JavaScript thread.
 
 ---
 
-## 2. High-Density Unified Data Relational Map
+## 2. The Native Engine (`rust_core/`)
 
-### Relational Entity-Relationship Flow
-The persistent entities are structured as follows:
-```
-corpora (Collections)
-   └── documents (SHA-256 Identification, Sandbox Storage Path)
-          └── sections (Recursive TOC Hierarchy, Sort Order)
-                 └── blocks (Atomic Page Segments, Serialized JSON ASTNode)
-```
-Secondary tables link annotations, tags, and progress tracking:
-* **`annotations`**: Highlight coordinates and markdown notes. Links to `documents` and `blocks` (nullable for Orphan Notes).
-* **`tags`**: Lowercase, stripped semantic indices.
-* **`block_tags`**: Junction table mapping many-to-many concepts.
-* **`processing_jobs` & `job_chunks`**: Status tracker enabling resilient resume loops if background execution crashes.
-* **`vector_cache`**: Synchronous cache storing `Float32Array` embeddings as raw SQLite `BLOB` fields (mapped directly to blocks, cascading on block removal).
+The backend is composed of several strictly encapsulated Cargo crates. Agents modifying the backend must respect these module boundaries:
 
-### SQLite FTS5 Trigger Architecture
-To isolate plain-text from JSON AST formatting strings (avoiding search hits on formatting attributes like `type`, `children`, `level`), the FTS virtual index is updated using native triggers. If the block contains valid JSON AST, the triggers utilize `json_tree` to select and concatenate only text-heavy keys:
-* **Insert Trigger (`blocks_fts_ai`)**:
-  ```sql
-  CREATE TRIGGER IF NOT EXISTS blocks_fts_ai AFTER INSERT ON blocks BEGIN
-    INSERT INTO blocks_fts(block_id, content)
-    VALUES (
-      new.id,
-      CASE 
-        WHEN json_valid(new.content) THEN (
-          SELECT group_concat(value, ' ') 
-          FROM json_tree(new.content) 
-          WHERE key IN ('text', 'code', 'alt', 'caption')
-        )
-        ELSE new.content
-      END
-    );
-  END;
-  ```
-* **Update Trigger (`blocks_fts_au`)**:
-  ```sql
-  CREATE TRIGGER IF NOT EXISTS blocks_fts_au AFTER UPDATE ON blocks BEGIN
-    DELETE FROM blocks_fts WHERE block_id = old.id;
-    INSERT INTO blocks_fts(block_id, content)
-    VALUES (
-      new.id,
-      CASE 
-        WHEN json_valid(new.content) THEN (
-          SELECT group_concat(value, ' ') 
-          FROM json_tree(new.content) 
-          WHERE key IN ('text', 'code', 'alt', 'caption')
-        )
-        ELSE new.content
-      END
-    );
-  END;
-  ```
-* **Delete Trigger (`blocks_fts_ad`)**:
-  ```sql
-  CREATE TRIGGER IF NOT EXISTS blocks_fts_ad AFTER DELETE ON blocks BEGIN
-    DELETE FROM blocks_fts WHERE block_id = old.id;
-  END;
-  ```
+* **`contracts`**: The central nervous system. Contains no business logic. Defines the unified JSON `ASTNode` structures, `AppError` enums (using `thiserror`), and uses `ts-rs` to automatically generate TypeScript bindings for the frontend.
+* **`dbs`**: The Data Access Layer. Manages a Dual-Database architecture:
+* *Content DB*: The persistent library containing corpora, processed blocks, and annotations. Features FTS5 plain-text triggers and SIMD-accelerated C++ vector caching for RRF hybrid search.
+* *Agent DB*: An ephemeral workspace (`agent_scratch.db`) used by the ReAct loop to store conversation history, staging blocks, and hypothesis data to prevent corrupting the main library.
+
+
+* **`parser`**: Pass 1 of ingestion. Uses `lopdf` and `pdfium-render` to extract raw text, overlapping chunks (100-token buffers), and geometric boundaries. Handles image sandboxing and direct bypass parsing for EPUB/HTML/Markdown.
+* **`inference`**: The hardware-accelerated AI execution layer. Manages embedded `llama.cpp` hooks, network API fallbacks, deterministic JSON grammar constraints, and a resilient, resumable Hugging Face model downloader.
+* **`agent_harness`**: Pass 2 of ingestion. A ReAct loop orchestrator that uses the `inference` layer to extract structures from `parser` chunks. Operates entirely inside the `dbs` Agent DB workspace before executing an atomic transaction handoff to the Content DB.
+* **`doc_sync`**: The collaborative peer-to-peer engine. Handles 16-bit LZW binary packing of `.notes` payloads, Bluetooth LE MTU chunking, W3C fuzzy re-anchoring across different book editions, and Myers 3-Way LCS merges for offline conflict resolution.
+* **`desktop_server`**: A local `axum` + `tokio` HTTP server exposing native Rust functions to local network requests. Crucially, it serves a `/db` endpoint that allows Web WASM (`sql.js`) to load the database for zero-emulator UI testing in standard web browsers.
 
 ---
 
-## 3. Production Architecture Boundaries & Critical Guardrails
+## 3. The Mobile Frontend (`mobile/`)
 
-To maintain peak performance and avoid regression bottlenecks, developers must follow these seven guardrails:
+Built with React Native and Expo SDK, the frontend is strictly a presentation layer.
 
-### 1. FlashList Bridge Serialization Volumetrics
-* **Risk**: Large blocks freeze the bridge during serialization and trigger layout recalculations in recycled FlashList cells, introducing micro-stutters.
-* **Limit**: Enforce a strict token/character upper bound ($200 \text{ to } 500 \text{ tokens}$ or ~1500 characters) per `blocks` entity. Longer sections must be segmented into multiple block entities to ensure smooth 120 FPS recyclerview recycling loops.
-
-### 2. Main-Thread Transaction Stalling
-* **Risk**: Opening SQLite write transactions or executing complex regex tag stripping/structural parsing on the JavaScript main UI thread freezes UI responsiveness.
-* **Rule**: Execute regex cleaning and structural delineation in native Rust or on background thread workers (via JSI Promise threads). Keep SQLite write loops batch-oriented and minimize open transaction duration.
-
-### 3. JSI Zero-Copy Memory Rules
-* **Risk**: Copying float vectors as standard JavaScript arrays over JSI bindings causes extensive memory allocation overhead and serialization latency.
-* **Rule**: Always pass vectors as `Float32Array` structures. Retrieve the raw float pointer on the C++ side using `ArrayBuffer` bindings directly:
-  ```cpp
-  jsi::ArrayBuffer arrayBuffer = bufferObj.getArrayBuffer(runtime);
-  float* data = reinterpret_cast<float*>(arrayBuffer.data(runtime));
-  ```
-
-### 4. Context Overlap Purging
-* **Risk**: Duplicate text blocks are saved in the database if overlap context elements (used to bridge page boundaries) are not stripped.
-* **Rule**: Delineation prompts contain instructions ordering the LLM to filter out the 100-token prefix overlap context when generating the page output blocks. Future prompt alterations must preserve this context-filtering constraint.
-
-### 5. Sync Conflict Topologies & Visual Merging
-* **Risk**: Collaborative annotation editing can clump the SQLite database or lead to UI clutter when multiple users highlight the same lines.
-* **Resolution**: 
-  * **Myers 3-Way LCS Merge**: Character/word-level Myers LCS merge rules (using `<<<<<<< OURS`, `=======`, `>>>>>>> THEIRS` markers) resolve collisions on markdown notes.
-  * **Decoupled Visual Merging**: Overlapping/identical highlights are stored as individual database records (with unique UUIDs and `author_id` identifiers). The mobile app uses `mergeOverlappingHighlights` to segment character offsets and dynamically display overlapping ranges cleanly, preventing database clumping.
-
-### 6. Mock Storage Degradation
-* **Risk**: Unit tests running against browser SQL mocks pass silently but fail on native devices.
-* **Warning**: The web-based SQL mock environment (when `NODE_ENV === 'test'`) operates as a basic in-memory JS structure. It does NOT enforce foreign keys, `ON DELETE CASCADE` cascades, multi-table FTS5 triggers, or atomic transaction locks. Always run integration tests on the native target or CORS gateway to validate database features.
+* **Adaptive Layouts**: Uses a `NavigationProvider` to switch between a Tablet 3-Pane grid (ToC, Reader, Margins) and a Smartphone collapsible view (Drawer, Reader, Bottom Sheet).
+* **Performance Engine**: Uses Shopify `FlashList` with pre-calculated, cached heights (generated by the Rust core) to recycle `ASTNode` UI components, achieving 120 FPS.
+* **Data Consumption**: Does NOT use `expo-sqlite` directly. All data reads and UI mutations invoke synchronous/asynchronous JSI methods provided by the `dbs` and `doc_sync` native crates.
 
 ### 7. Strict Error Handling Policies
 * **Risk**: Thread panics in the Rust engine crash the entire mobile application ungracefully via the JSI bridge.
@@ -152,60 +63,72 @@ To maintain peak performance and avoid regression bottlenecks, developers must f
 
 ---
 
-## 4. Interactive Testing, Building, & Verification Playbook
+## 4. Production Architecture Boundaries & Critical Guardrails
 
-### Developer Commands Matrix
+To maintain peak performance and avoid regression bottlenecks, developers and AI agents must follow these guardrails:
 
-#### A. Configure & Build Build System
-```bash
-# Initialize build directory
-cmake -B build
+1. **Idiomatic Error Handling (No Panics)**
+* *Risk*: Unrecoverable panics in the backend crash the entire host mobile application.
+* *Rule*: Use type-safe error propagation via explicit `Result<T, AppError>` (from the `contracts` crate). `.unwrap()`, `.expect()`, and `panic!()` are strictly prohibited in production execution paths.
 
-# Compile Rust native target libraries (libparser.a, libinference.a)
-cmake --build build --target rust_core_libs
 
-# Compile desktop gateway HTTP server
-cmake --build build --target desktop-server
-```
+2. **JSI Zero-Copy Memory Rules**
+* *Risk*: Deep-copy string marshalling lag on the JNI boundary causes heavy serialization performance hits.
+* *Rule*: Return native Rust byte arrays wrapped inside a zero-copy buffer (yielding `ArrayBuffer`), keeping the standard React Native bridge clear of large strings. Let JS parse it natively via `TextDecoder`.
 
-#### B. Run Servers Locally
-```bash
-# Start desktop server (serves SQLite DB on port 8080/db)
-cmake --build build --target start-desktop-server
 
-# Start Expo Web Metro development server (runs client on port 19006)
-cmake --build build --target start-web-server
-```
+3. **Strict Schema Parity**
+* *Risk*: Database shapes and frontend TypeScript definitions drift, causing silent UI failures.
+* *Rule*: Never manually update TypeScript interfaces in the `mobile/` app for core data structures. Modify the Rust structs in `rust_core/contracts`, run the `ts-rs` generation, and let the build system propagate the changes.
 
-#### C. Run Test Suites
-```bash
-# Navigate to the build directory to run ctest
-cd build
 
-# Run all verification suites (Cargo, Jest, and Readme checks)
-ctest --output-on-failure
+4. **Agent Isolation**
+* *Risk*: Bad LLM outputs corrupt the user's permanent library.
+* *Rule*: The LLM must *never* write directly to the Content DB. All generative tool calls must target the ephemeral Agent DB. Migration only occurs via atomic transaction once the extraction is fully validated.
 
-# Run Synthetic Validation Integration pipeline only
-ctest -C Debug -R SyntheticValidationTest --output-on-failure
-
-# Run Cargo Rust tests only
-ctest -C Debug -R CargoTests --output-on-failure
-
-# Run Jest client tests only
-ctest -C Debug -R JestTests --output-on-failure
-```
-
-### Compile-Time Options & Configuration Switches
-These variables are passed to CMake during configuration (`cmake -B build -DOPTION=VALUE`):
-* `-DBUILD_ANDROID_APK=ON/OFF` (Default: `OFF`): Cross-compiles for Android architectures, resolving NDK toolchain compilers automatically.
-* `-DBUILD_IOS_FRAMEWORK=ON/OFF` (Default: `OFF`): Prepares Objective-C++ dynamic targets for CocoaPods / EAS iOS builds.
-* `-DLLAMA_NATIVE=ON/OFF` (Default: `OFF`): Links upstream `llama.cpp` using local cache directories.
 
 
 ---
 
-## 5. Change Log & Addendums
+## 5. Developer Commands Matrix
 
-### [v1.9.0] - Agentic Pass 2 Architecture Restoration
-- **Agentic Pass 2 Architecture**: Refactored the Pass 2 orchestrator within the `agent_harness` crate. The system continues to use a ReAct loop but now correctly aligns its `agent_scratch.db` ephemeral initialization with the official Drizzle schema (`0000_fresh_newton_destine.sql`) from the React Native client. We enforce a dual-database boundary using atomic `ATTACH DATABASE` transactions within `migration.rs`.
-- **Multi-Format Extensibility**: Integrated unified `ASTNode` generation in `parser/src/lib.rs` and added a clean `parse_document` router, providing scaffolded entry points for Markdown, HTML, and EPUB structures alongside the existing PDF layout engine.
+**A. Unified Build & Configuration**
+
+```bash
+# Configure workspace and resolve toolchains (Host OS)
+cmake -B build
+
+# Build full workspace (Rust libraries + Expo NPM dependencies)
+cmake --build build
+
+```
+
+**B. Testing Suites**
+
+```bash
+# Run all automated tests (Rust + React Native + E2E)
+ctest -C Debug --output-on-failure
+
+# Run only the synthetic PDF data validation tests
+ctest -C Debug -R SyntheticValidationTest --output-on-failure
+
+```
+
+**C. Zero-Emulator Browser Testing**
+
+```bash
+# Boot the local Rust Axum server (Port 8080)
+cargo run -p desktop_server
+
+# In a separate terminal, boot the React Native Web interface (Port 8081)
+cd mobile && npx expo start --web
+
+```
+
+---
+
+## 6. Change Log & Addendums
+
+* **[v2.0.0] - Modular Rust Workspace Refactor**: Completely decomposed the monolithic `rust_core` into isolated responsibility crates (`contracts`, `dbs`, `parser`, `inference`, `agent_harness`, `doc_sync`, `desktop_server`). Transitioned the frontend to a pure thin-client model reading from JSI Native bindings.
+* **[v2.1.0] - Dual-DB Agent Isolation**: Introduced the ephemeral Agent DB (`agent_scratch.db`) alongside the main Content DB to securely sandbox ReAct loop state, conversation history, and malformed JSON quarantine areas prior to atomic migration.
+* **[v2.2.0] - Native Sync Pushdown**: Migrated all offline collaborative logic (LZW packing, Myers 3-Way Merge, BLE partitioning) from TypeScript into the high-performance `doc_sync` Rust crate.

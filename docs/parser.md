@@ -1,90 +1,45 @@
 # Parser Subsystem (`rust_core/parser`)
 
-The `parser` sub-crate inside the `rust_core` workspace is a high-performance native library built in Rust. It executes **Pass 1** of the PDF ingestion pipeline: performing low-level structural content stream analysis and high-fidelity visual layout boundary extraction.
+The `parser` sub-crate is the entry point for all document ingestion. Operating as **Pass 1** of the pipeline, this high-performance native Rust library is responsible for extracting raw text, geometric coordinates, and embedded assets from source files. It prepares optimized payloads that are either handed off to the `agent_harness` (for PDFs) or formatted directly into the final AST (for lightweight formats).
 
 ---
 
-## 1. Subsystem Architecture
+## 1. Dual-Engine PDF Layout Extraction
 
-```mermaid
-graph TD
-    A[Raw PDF Path] --> B[lopdf Ingest]
-    A --> C[pdfium-render Engine]
-    B -->|Content Stream Structure| D[Combined Layout Boundary Mapper]
-    C -->|Column Bounding Boxes & Fonts| D
-    D -->|Text & Bbox Mapping| E[Overlap Context Chunker]
-    E -->|JSON Output Payload| F[Mobile Frontend API Wrapper]
-```
+Extracting text from PDFs while maintaining semantic grouping (e.g., keeping multi-column text from blending together) requires a hybrid approach. The parser utilizes two distinct engines working in tandem:
+
+* **`lopdf` (Structural Extraction):** Interacts directly with the raw PDF catalog stream. It decompresses object streams to identify text strings and fonts without geometric distortion, providing 100% accurate character-level extraction.
+* **`pdfium-render` (Geometric Mapping):** Renders the document into an invisible virtual viewport to calculate the exact physical bounding boxes (mapped to standard PostScript points) of every text block, column, and image.
+
+By combining the structural data from `lopdf` with the geometric coordinates from `pdfium-render`, the parser accurately reconstructs the reading order of complex, multi-column pages before the LLM ever sees the text.
 
 ---
 
-## 2. Low-Level Ingestion Components
+## 2. Semantic Overlap Context Chunker
 
-### A. lopdf Structural Extraction
-- **Scope**: Parses raw PDF structural object streams to understand internal PDF catalog mappings, fonts, and resource reference dictionaries.
-- **Role**: Extracts raw textual characters directly from text content drawing operations (`TJ`, `Tj`) without layout distortion, ensuring 100% extraction fidelity for tabular structures and text boundaries.
+When parsing PDFs page-by-page, sentences are frequently cut in half across page boundaries. To prevent the LLM in Pass 2 from hallucinating missing context, the `parser` implements a semantic overlap chunker.
 
-### B. pdfium-render Geometry Extraction
-- **Scope**: Compiles and runs high-fidelity native layouts.
-- **Role**: Runs rendering-based boundary computations. Identifies geometric coordinates of visual elements (characters, text groups, images, shapes).
-- **Bounding Box System**: Layout maps output coordinates scaled to standard PostScript points ($1/72$ inch), mapped from top-left (0,0) relative to page bounds.
-
-### C. Overlap Context Chunker
-- **Challenge**: Parsing pages in isolation cuts off context when heading definitions, sentences, or code blocks span across page borders.
-- **Strategy**: The chunker prepends a semantic overlap context buffer to each page's raw text.
-  - **Buffer Size**: Prefixes the last 3-5 sentences (~100 tokens) of page $N-1$ to the beginning of page $N$.
-  - **Deduplication Tag**: Pre-marked with distinct metadata tags so the downstream LLM (Pass 2) ignores the overlap segment during text generation while utilizing it for full semantic context matching.
+* **The Overlap Buffer:** As the parser iterates through pages, it captures the final ~100 tokens (roughly 3-5 sentences) of Page $N-1$.
+* **Payload Construction:** It appends this buffer to the beginning of the `ExtractionChunk` payload for Page $N$.
+* **Metadata Tagging:** This buffer is strictly tagged in the JSON payload so the downstream `agent_harness` knows to use it for context resolution, but *not* to duplicate it into the final database blocks.
 
 ---
 
-## 3. Sandboxed Image Asset Extraction
+## 3. High-Fidelity Asset Sandboxing
 
-- **Execution**: When inline or vector images are encountered in the object streams:
-  1. The raw image stream is decoded, uncompressed, and transcoded into high-performance, compressed PNG bytes.
-  2. The system computes the cryptographic SHA-256 hash of the image data.
-  3. The file is saved inside the app's local sandbox partition under:
-     `documents/images/[sha256_hash]_[image_id].png`
-  4. The local SQLite database stores the asset reference using the custom dynamic scheme `local-asset://[image_id].png` to ensure iOS sandbox path portability.
+The parser securely isolates all embedded graphical assets to prevent the final database payload from ballooning in size.
 
----
-
-## 4. Prompt Refinement Tracker (`prompt_history.json`)
-
-Pass 2 prompts are strictly versioned, tracked, and tested to ensure they do not produce schema regressions. The prompt history registry resides inside the tests folder:
-`rust_core/parser/tests/prompt_history.json`
-
-### Prompt Verification Checklist
-- [ ] **Schema Compliance**: LLM responses must strictly adhere to the `blocks` array output contract.
-- [ ] **Layout Integrity**: Golden test files verify multi-column tables, nested list sequences, and code listings are parsed without tag misalignment.
-- [ ] **Token Limits**: System prompting remains lightweight, preventing context fatigue on local 4-bit quantized mobile models.
+1. **Interception:** Intercepts inline/vector image drawing operands in the PDF catalog stream or `<img>` tags in EPUB/HTML.
+2. **Transcoding & Compression:** Decompresses raw image byte streams and transcodes them into highly compressed PNG files.
+3. **Cryptographic Hashing:** Hashes the resulting bytes using SHA-256 to prevent storing duplicate images (e.g., a publisher's logo appearing on every page).
+4. **Local URIs:** Saves the image to the secure mobile application sandbox and emits a stable `local-asset://[hash_id].png` link. This dynamic schema is resolved at runtime by the frontend, preventing absolute `file://` path breakages when the mobile OS updates application UUIDs.
 
 ---
 
-## 5. Change Log & Addendums
+## 4. Multi-Format Bypass Pipeline (EPUB, HTML, Markdown)
 
-### [v1.1.0] - 2026-05-28
-- **Phase 10 Dynamic Image Extraction**: Implemented type-safe character iteration (`page_text.chars().iter()`) using `c.loose_bounds()` and `c.unicode_string()`. Formulated high-fidelity image extraction utilizing `pdfium-render` (`as_image_object()` and `get_processed_image(&doc)`) with `/Subtype /Image` stream fallbacks in `lopdf::Stream::decompressed_content()`. Decodes standard compression filters, hashes raw bytes under SHA-256, and writes compressed sandbox PNGs. Returns physical coordinates, dimensions, and local portable `local-asset://` URIs inside `PageExtraction` contracts.
+While complex PDFs require an LLM to deduce their structure, standard lightweight formats already contain structural metadata. To save processing time, battery, and token costs, the `parser` implements a direct-bypass pipeline.
 
-### [v1.2.0] - 2026-05-28
-- **Phase 13 Multi-Format Parser Integration (EPUB, HTML, Markdown)**: Extended native Rust core extraction interface to support static structured analysis. Built lightweight Markdown line parser in Rust (extracting recursive headings, paragraphs, lists, quotes, images), standardizing DOM-like tags parser for HTML (stripping head/script elements and parsing tables), and spine chapter crawler for EPUB. Extended JSI Promise bridge mock fallbacks inside `RustParserBridge.ts` to allow 100% test and simulator portability. Structured multi-format outputs route dynamically in background workers, populating schema-conformant tables directly inside atomic transactions.
-
-### [v1.3.0] - 2026-06-03
-- **Rust Core JSON AST Schema Standardization**: Refactored static and multi-format parsers in `rust_core/parser/src/lib.rs` (and JS mock counterparts in `RustParserBridge.ts` under `parsePDFAsync`) to output serialized JSON-based Semantic AST structures (`ASTNode`) instead of XHTML tag strings. This includes table, heading, paragraph, list, and quote block types, ensuring that the ingestion pipeline outputs standardized data structures.
-
-### [v1.4.0] - 2026-06-03
-- **Pass 2 LLM Delineation & Context Filtering**: Decoupled static layout extraction from Pass 2 semantic transformation by implementing a dedicated `rust_core/delineator` crate. Added prompt-building logic to utilize 100-token semantic overlap context for page continuity while filtering it out of final output blocks. Integrated C FFI bindings (`delineate_page_ffi` and `free_rust_delineator_string`) with the React Native JSI C++ bridge `delineatePageAsync` resolving on background worker threads. Expose HTTP `/delineate` endpoint in the Desktop Server.
-
-### [v1.5.0] - 2026-06-03
-- **E2E Integration Testing Pipeline**: Created integration test harness verifying static layout parsing, image hashes, delineator context filtering, and SQLite FTS database schema serialization.
-
-### [v1.6.0] - 2026-06-04
-- **Line-Based Layout Sorting & Segment Grouping**: Implemented a line-level layout analysis algorithm grouping raw PDF character/word tokens by vertical center proximity (with 8.0 PostScript points tolerance) to prevent false-positive column-segmentation results on single-column documents. Introduced vertical top-to-bottom and horizontal left-to-right sorting orders on grouped lines, securing 100% token order accuracy across multi-page, text-heavy PDFs. Integrated a localized test harness `research_notes_test.rs` to verify ingestion boundaries.
-
-### [v1.7.0] - 2026-06-04
-- **End-to-End LLM Ingestion Pipeline & Model Downloader Integration Test**: Added a comprehensive integration test suite `e2e_llm_ingestion.rs` under `rust_core/parser/tests/`. The suite verifies model downloading resiliency, sandbox validation, range-header resume operations, post-download checksum validations, layout extraction, overlap context purging, SQLite serialization, and FTS5 synchronization.
-
-### [v1.8.0] - 2026-06-04
-- **Modular Metadata Extractor Trait & Table of Contents Parsing**: Defined the core `MetadataExtractor` trait in `rust_core/delineator` to sequentially process layout data without cross-contamination. Implemented `IndexExtractor` as its canonical implementation to extract document index items (chapters, section mappings) by querying local model weights. Enabled runtime download of targeted GGUF models (`unsloth/gemma-4-E2B-it-GGUF` at `UD_IQ2_M`) via FFI bindings linked to `ModelDownloader`, guaranteeing full model presence prior to boot sequences.
-
-
-
+* **EPUB Crawler:** Unzips the `.epub` archive, reads the `content.opf` / `toc.ncx` to establish the exact reading order, and parses the internal XHTML nodes.
+* **Direct-to-AST:** HTML DOM tag strippers and Markdown line-by-line tree generators parse these formats directly into the `ASTNode` structures defined in the `contracts` module.
+* **LLM Bypass:** Because the structure is inherently known, these documents completely bypass the `agent_harness` and `inference` layers, shipping their final structured blocks directly to the `dbs` module for immediate atomic insertion.

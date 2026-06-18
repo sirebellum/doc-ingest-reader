@@ -1,47 +1,47 @@
-# Agentic Pass 2 Architecture (Agent Harness)
+# Agent Harness Subsystem (`rust_core/agent_harness`)
 
-This document details the Pass 2 pipeline architecture residing in `rust_core/agent_harness`, which is responsible for semantic structuring of ingested documents.
-
----
-
-## 1. Architectural Shift: From Pipeline to Stateful ReAct Loop
-
-The Pass 2 semantic structuring has moved away from a traditional, linear delineator pipeline. Instead, it utilizes a stateful **Agent Harness** operating as a ReAct (Reasoning and Acting) loop.
-
-- **Stateful Execution**: The `AgentState` manages the active lifecycle of the ingestion process. Instead of passing data blindly through functions, the LLM actively explores the provided context and coordinates the database mapping.
-- **C FFI Interface**: The loop operates efficiently over C FFI, enabling seamless interop with the JSI bridge and the React Native frontend without native memory overhead or thread blockages.
-
-## 2. Ephemeral Agent Database (`temp_agent_scratch.db`)
-
-To ensure maximum performance and protect the primary UI thread rendering the 120fps FlashList, the Agent Harness utilizes a dedicated ephemeral database: `temp_agent_scratch.db`.
-
-- **Isolated Sandbox**: The `temp_agent_scratch.db` is an isolated physical file on disk wiped between sessions.
-- **1-to-1 Mirror**: It contains exact structural replicas of `sections`, `blocks`, `block_tags`, and `cross_references` tables to enable rapid inserts.
-- **Pipeline Memory (`agent_context`)**: Immediate prompt history and reasoning steps (`id`, `session_id`, `role`, `content`, `token_count`) are tracked linearly in this database. This provides the LLM with conversational context without polluting the permanent layout DB.
-- **Atomic Migration Hook**: When ingestion completes, the `migrate_agent_to_content` hook runs an `ATTACH DATABASE` maneuver. This atomically inserts the scratch data into the permanent `content.db` wrapped securely within a `BEGIN TRANSACTION; ... COMMIT;` block.
-
-## 3. Type-Safe Rust Tools (MCP / JSON Schema)
-
-The LLM is strictly prohibited from running raw SQL. Instead, the Agent Harness provides a Model Context Protocol (MCP) compatible suite of type-safe Rust tools, accessible via `serde_json` arguments:
-
-1. **`QueryAgentDB`**: Fetch semantic layout text and metadata (including 100-token overlaps) from `pass1_chunks`.
-2. **`CreateNode`**: Safely insert new `sections` or `blocks` with appropriate CRDT configurations.
-3. **`LinkNodes`**: Dynamically link structural sections together.
-4. **`AskHuman`**: Suspend operation and yield a Human-in-the-Loop request for clarification.
-5. **`ParsingComplete`**: Signal the Rust orchestrator that the chunk has been fully processed and to begin atomic migration.
-
-## 4. Parser Resiliency & Human-in-the-Loop (HITL)
-
-The parser logic strictly avoids thread panics. Idiomatic Rust `Result<T, E>` vectors are utilized heavily.
-
-- **Error Catching**: If the LLM generates malformed JSON, the step loop catches the parsing error and returns a clean "System Error" string back into the prompt context, allowing the LLM to self-correct automatically.
-- **5-Failure Threshold**: If the LLM fails 5 consecutive tool calls (e.g. repeated invalid JSON, hallucinated tool schemas), the Agent Harness does not crash. Instead, it pauses the execution and transitions the `AgentStatus` to `WaitingForHuman`, yielding control back to the UI for Human-in-the-Loop interventions.
+The `agent_harness` sub-crate manages Pass 2 of the ingestion pipeline. Rather than executing a simple, linear LLM pass, this module deploys a stateful, tool-calling AI agent operating in a ReAct (Reason + Act) loop. Its primary responsibility is to autonomously navigate, semantically tag, and structure the raw layout data extracted during Pass 1 into a clean JSON Abstract Syntax Tree (AST).
 
 ---
 
-## 5. Change Log & Addendums
+## 1. The Ephemeral Workspace (Agent DB)
 
-### [v1.0.0] - Agent Harness Initial Specification
-- Specified the stateful ReAct loop orchestration within `rust_core/agent_harness`
-- Detailed the ephemeral `temp_agent_scratch.db` atomic migration hook (`migrate_agent_to_content`).
-- Mapped out the 5 type-safe JSON tools and the 5-failure threshold HITL protection.
+To prevent polluting the main application database (Content DB) with incomplete or malformed LLM outputs, the Agent Harness operates entirely within an isolated, temporary SQLite database workspace.
+
+* **Initialization:** When a document enters Pass 2, the harness spins up a temporary database (`agent_scratch.db`).
+* **Data Ingestion:** The raw text and layout coordinates from Pass 1 (including the 100-token semantic overlap buffers) are pushed into this scratch database.
+* **Schema Parity:** The Agent DB utilizes a table schema that explicitly mirrors the main Content DB, allowing the agent to format blocks, sections, and metadata exactly as they will appear in production.
+
+---
+
+## 2. Iterative ReAct Orchestration
+
+The harness acts as the execution boundary between the embedded LLM (via the `inference` module) and the temporary database. It runs a ReAct loop that allows the LLM to process the document iteratively:
+
+1. **Querying:** The agent issues tool calls to query specific chunks of raw text from the Agent DB.
+2. **Structuring:** The LLM parses the raw text, identifies structural markers (e.g., chapter headings, list items, tables, and indices), and formats them into the unified JSON AST schema.
+3. **Updating:** The agent uses writing tools to iteratively update the rows in the Agent DB with the newly structured blocks and metadata tags.
+4. **Context Management:** The harness manages the LLM's context window by aggressively pruning history and utilizing the database as the primary source of memory state, preventing context overflow on long PDFs.
+
+---
+
+## 3. Extensible Tooling Interfaces
+
+The agent's capabilities are defined by a strict set of JSON/MCP (Model Context Protocol) tool schemas. This design ensures that metadata generation is highly extensible.
+
+Current tooling allows the agent to:
+
+* Extract and generate Table of Contents (ToC) indices for documents missing native structural metadata.
+* Create semantic links and cross-references between different sections.
+* Tag text blocks with relational metadata.
+* *(Future Extensibility)*: Because the tooling is abstracted, developers can easily add new tool schemas (e.g., "Extract Entities", "Summarize Chapter") without rewriting the core ReAct loop.
+
+---
+
+## 4. Atomic Migration
+
+Once the agent concludes its extraction and formatting tasks (or reaches a defined completion state), the harness orchestrates a secure handoff:
+
+1. **Validation:** The harness verifies the structured AST nodes within the Agent DB for schema compliance.
+2. **Migration:** The `agent_harness` signals the `dbs` (Database) module to attach the ephemeral database to the main Content DB. An atomic SQL transaction safely copies all completed entities (documents, sections, blocks, tags) into the permanent storage.
+3. **Cleanup:** Upon successful migration, the temporary Agent DB is securely dropped from the file system, leaving no orphaned data.
