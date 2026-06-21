@@ -1,0 +1,11 @@
+[submodule "third_party/depot_tools"]
+	path = third_party/depot_tools
+	url = https://chromium.googlesource.com/chromium/tools/depot_tools.git
+	branch = main
+[submodule "third_party/llama.cpp"]
+	path = third_party/llama.cpp
+	url = https://github.com/ggerganov/llama.cpp.git
+[submodule "third_party/pdfium"]
+	path = third_party/pdfium
+	url = https://pdfium.googlesource.com/pdfium.git
+	branch = main
