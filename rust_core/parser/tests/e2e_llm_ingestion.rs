@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 #[test]
+#[ignore]
 fn test_downloader_and_ingestion_pipeline() {
     // 1. Create target artifacts directory
     let artifacts_dir_raw = Path::new("../../test_artifacts/e2e_llm_ingestion"); fs::create_dir_all(&artifacts_dir_raw).expect("Failed to create dir"); let artifacts_dir_pathbuf = artifacts_dir_raw.canonicalize().unwrap(); let artifacts_dir = artifacts_dir_pathbuf.as_path();

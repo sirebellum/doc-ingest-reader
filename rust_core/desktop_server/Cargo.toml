@@ -10,7 +10,6 @@ inference = { path = "../inference" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tiny_http = "0.12.0"
-anyhow = "1.0"
-
+contracts = { path = "../contracts" }
 [features]
 verbose-logging = ["parser/verbose-logging", "inference/verbose-logging"]

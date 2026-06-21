@@ -1,5 +1,5 @@
 import { RustParserBridge } from '../native/RustParserBridge';
-import { getDatabaseAdapter } from './backup';
+import { DbsBridge } from '../native/DbsBridge';
 
 interface HeapStats {
   total_allocated_bytes: number;
@@ -26,7 +26,6 @@ export class VectorLRUCache {
     const byteOffset = bytes.byteOffset || 0;
     const byteLength = bytes.byteLength || bytes.length;
     
-    // Safety check for alignment
     if (byteOffset % 4 === 0) {
       return new Float32Array(arrayBuffer, byteOffset, byteLength / 4);
     } else {
@@ -35,10 +34,9 @@ export class VectorLRUCache {
     }
   }
 
-  get(blockId: string): Float32Array | undefined {
+  async get(blockId: string): Promise<Float32Array | undefined> {
     const value = this.cache.get(blockId);
     if (value !== undefined) {
-      // Move to end to mark as most recently used
       this.cache.delete(blockId);
       this.cache.set(blockId, value);
       return value;
@@ -46,13 +44,9 @@ export class VectorLRUCache {
 
     if (this.dbInstance) {
       try {
-        const db = getDatabaseAdapter(this.dbInstance);
-        const row = db.get<{ vector: Uint8Array | Buffer }>(
-          'SELECT vector FROM vector_cache WHERE block_id = ?;',
-          [blockId]
-        );
-        if (row && row.vector) {
-          const vector = this.toFloat32Array(row.vector);
+        const vectorBytes = await DbsBridge.getVectorAsync(blockId);
+        if (vectorBytes) {
+          const vector = this.toFloat32Array(vectorBytes);
           this.cache.set(blockId, vector);
           return vector;
         }
@@ -67,31 +61,20 @@ export class VectorLRUCache {
   async set(blockId: string, vector: number[] | Float32Array): Promise<void> {
     const floatVec = vector instanceof Float32Array ? vector : new Float32Array(vector);
 
-    // Remove existing entry if present
     this.cache.delete(blockId);
     this.cache.set(blockId, floatVec);
 
     if (this.dbInstance) {
       try {
-        const db = getDatabaseAdapter(this.dbInstance);
         const byteView = new Uint8Array(floatVec.buffer, floatVec.byteOffset, floatVec.byteLength);
-        let bindValue: any = byteView;
-        if (typeof Buffer !== 'undefined') {
-          bindValue = Buffer.from(floatVec.buffer, floatVec.byteOffset, floatVec.byteLength);
-        }
-        db.run(
-          'INSERT OR REPLACE INTO vector_cache (block_id, vector) VALUES (?, ?);',
-          [blockId, bindValue]
-        );
+        await DbsBridge.setVectorAsync(blockId, byteView);
       } catch (error) {
         console.warn(`[VectorLRUCache] Error writing to SQLite for ${blockId}:`, error);
       }
     }
 
-    // Check memory and evict if needed
     await this.checkMemoryAndEvict();
 
-    // If we exceed maxSize, evict oldest entries
     if (this.cache.size > this.maxSize) {
       const entriesToEvict = this.cache.size - this.maxSize;
       const iterator = this.cache.keys();
@@ -125,12 +108,10 @@ export class VectorLRUCache {
 
       const heapStats: HeapStats = JSON.parse(statsString);
 
-      // Check for aggressive eviction conditions
       if (
         heapStats.available_system_ram_bytes < 150_000_000 || 
         heapStats.active_context_bytes > 0.9 * heapStats.system_memory_limit_bytes
       ) {
-        // Aggressively evict oldest 50% of entries to prevent system OOM terminations
         const entriesToEvict = Math.max(1, Math.floor(this.cache.size / 2));
         const iterator = this.cache.keys();
         for (let i = 0; i < entriesToEvict; i++) {
@@ -142,7 +123,6 @@ export class VectorLRUCache {
         }
       }
     } catch (error) {
-      // If we can't get heap stats or parsing fails, proceed normally
       console.warn('Failed to get heap stats for memory check:', error);
     }
   }

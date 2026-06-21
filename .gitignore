@@ -156,3 +156,14 @@ temp/
 !/test_artifacts/test_inputs/
 *.part
 *.lock
+# ------------------------------------------
+# Third Party / gclient Downloads
+# ------------------------------------------
+/third_party/.gclient
+/third_party/.gclient_entries
+/third_party/build/
+/third_party/testing/
+/third_party/buildtools/
+/third_party/.cipd/
+/third_party/.gclient_previous_sync_commits
+/third_party/.gcs_entries

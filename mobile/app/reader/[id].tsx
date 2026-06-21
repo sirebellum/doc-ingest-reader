@@ -33,7 +33,7 @@ import {
 import { isTabletWidth } from '../../src/utils/layout';
 import { TypographyConfig } from '../../src/database/pagination';
 import { useDatabaseSync } from '../../src/hooks/useDatabaseSync';
-import { db } from '../../src/database/schema';
+import { DbsBridge } from '../../src/native/DbsBridge';
 import { exportDocumentNotesBackup, importDocumentNotesBackup } from '../../src/database/backup';
 import { generateAuthorKeyPair } from '../../src/utils/crypto';
 
@@ -379,17 +379,14 @@ export default function ReadingScreen() {
 
   const fetchBlocksForSection = async (sectionId: string) => {
     try {
-      const blocks = await db.getAllAsync(
-        'SELECT * FROM blocks WHERE section_id = ? ORDER BY sort_order ASC',
-        [sectionId]
-      ) as Block[];
+      const blocks = await DbsBridge.getBlocksForSectionAsync(sectionId);
       
       setSectionBlocksCache(prev => ({ ...prev, [sectionId]: blocks }));
       
       // Fetch annotations for these blocks
-      const blockIds = blocks.map(b => b.id).map(bid => `'${bid}'`).join(',');
-      if (blockIds) {
-        const anns = await db.getAllAsync(`SELECT * FROM annotations WHERE block_id IN (${blockIds})`) as Annotation[];
+      if (blocks.length > 0) {
+        const blockIds = blocks.map(b => b.id);
+        const anns = await DbsBridge.getAnnotationsForBlocksAsync(blockIds);
         setAnnotations(prev => {
           const combined = [...prev];
           anns.forEach(a => {
@@ -537,16 +534,10 @@ export default function ReadingScreen() {
 
     try {
       if (exists) {
-        await db.runAsync(
-          'UPDATE annotations SET color_code = ?, note_body = ?, highlighted_text = ?, updated_at = ? WHERE id = ?',
-          [color, noteBody, highlightedText, updatedAnnotation.updated_at ?? null, updatedAnnotation.id]
-        );
+        await DbsBridge.saveAnnotationAsync(updatedAnnotation);
         setAnnotations(annotations.map(a => a.id === activeAnnotation.id ? updatedAnnotation : a));
       } else {
-        await db.runAsync(
-          'INSERT INTO annotations (id, document_id, block_id, annotation_type, color_code, highlighted_text, note_body, anchor_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [updatedAnnotation.id, updatedAnnotation.document_id, updatedAnnotation.block_id, updatedAnnotation.annotation_type, color, highlightedText, noteBody, updatedAnnotation.anchor_metadata]
-        );
+        await DbsBridge.saveAnnotationAsync(updatedAnnotation);
         setAnnotations([...annotations, updatedAnnotation]);
       }
     } catch (e) {
@@ -569,7 +560,7 @@ export default function ReadingScreen() {
   const handleDeleteAnnotation = async () => {
     if (!activeAnnotation) return;
     try {
-      await db.runAsync('DELETE FROM annotations WHERE id = ?', [activeAnnotation.id]);
+      await DbsBridge.deleteAnnotationAsync(activeAnnotation.id);
       setAnnotations(annotations.filter(a => a.id !== activeAnnotation.id));
     } catch (e) {}
 
@@ -599,11 +590,10 @@ export default function ReadingScreen() {
   };
 
   // Secure Notes Backup Export
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     if (!activeDoc) return;
     try {
-      const backupPayload = exportDocumentNotesBackup(
-        db,
+      const backupPayload = await exportDocumentNotesBackup(
         activeDoc.id,
         privateKey || undefined,
         publicKey || undefined
@@ -639,7 +629,7 @@ export default function ReadingScreen() {
                 },
                 annotations: []
               };
-              importDocumentNotesBackup(db, payload);
+              await importDocumentNotesBackup(payload);
               if (activeSectionId) {
                 fetchBlocksForSection(activeSectionId);
               }

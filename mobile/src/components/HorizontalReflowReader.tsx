@@ -137,10 +137,24 @@ export function HorizontalReflowReader({
   });
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
 
-  // Re-calculate pages dynamically on-mount, on-resize, or typography change
-  const pages = useMemo(() => {
-    if (!blocks || blocks.length === 0) return [];
-    return paginateBlocks(blocks, viewport, typography, dbInstance);
+  const [pages, setPages] = useState<ChapterPage[]>([]);
+  
+  useEffect(() => {
+    let isMounted = true;
+    if (!blocks || blocks.length === 0) {
+      setPages([]);
+      return;
+    }
+    
+    paginateBlocks(blocks, viewport, typography, dbInstance).then(resolvedPages => {
+      if (isMounted) {
+        setPages(resolvedPages);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, [blocks, viewport, typography, dbInstance]);
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {

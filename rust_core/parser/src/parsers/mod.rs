@@ -1,11 +1,11 @@
-use anyhow::Result;
+use contracts::error::AppError;
 
 pub trait DocumentParser {
     /// Parses the document and returns a serialized JSON string representing CanonicalDocument or PageExtraction schema.
-    fn parse<'a>(&self, file_path: &str) -> Result<String>;
+    fn parse<'a>(&self, file_path: &str) -> Result<String, AppError>;
     
     /// Future-proofed method to handle embedded assets, extracting them to a sandbox directory and returning `local-asset://` URIs.
-    fn extract_assets(&self, file_path: &str, output_dir: &str) -> Result<Vec<String>>;
+    fn extract_assets(&self, file_path: &str, output_dir: &str) -> Result<Vec<String>, AppError>;
 }
 
 pub mod pdf_parser;

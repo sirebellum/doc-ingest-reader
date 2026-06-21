@@ -1,7 +1,7 @@
 //! Embedded llama.cpp bindings for offline inference inside rust_core.
 //! Dynamically binds and executes on-device models with hardware neural acceleration.
 
-use anyhow::{anyhow, Result};
+use contracts::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock};
 use std::ffi::{CStr, CString};
@@ -185,8 +185,8 @@ fn update_heap_stats_on_dealloc(bytes_deallocated: u64) {
 
 /// Initializes local llama.cpp model context and hardware acceleration (e.g. NPU, DSP, NEON).
 /// Dynamically locates the dynamic shared library and configures neural processors.
-pub fn initialize_inference_context(model_path: &str) -> Result<()> {
-    let mut ctx_guard = get_llama_context().lock().map_err(|e| anyhow!("Mutex lock poison error: {}", e))?;
+pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
+    let mut ctx_guard = get_llama_context().lock().map_err(|e| AppError::Generic(format!("Mutex lock poison error: {}", e)))?;
     
     // Safety check & platform fallback resolution
     let lib_name = if cfg!(target_os = "windows") {
@@ -201,10 +201,10 @@ pub fn initialize_inference_context(model_path: &str) -> Result<()> {
 
     // Standard pre-check to verify model weight existence before loading
     if !std::path::Path::new(model_path).exists() {
-        return Err(anyhow!(
+        return Err(AppError::Generic(format!(
             "Model weights file not found at path: {}. Please download a valid GGUF file.",
             model_path
-        ));
+        )));
     }
 
     let hw_accelerated = detect_npu_hardware_compatibility();
@@ -243,7 +243,7 @@ pub fn initialize_inference_context(model_path: &str) -> Result<()> {
             let c_model_path = CString::new(model_path)?;
             let model = llama_cpp_sys_2::llama_load_model_from_file(c_model_path.as_ptr(), model_params);
             if model.is_null() {
-                return Err(anyhow!("Failed to load llama.cpp model from file"));
+                return Err(AppError::Generic(format!("Failed to load llama.cpp model from file")));
             }
 
             // Setup context params
@@ -253,7 +253,7 @@ pub fn initialize_inference_context(model_path: &str) -> Result<()> {
             let context = llama_cpp_sys_2::llama_new_context_with_model(model, ctx_params);
             if context.is_null() {
                 llama_cpp_sys_2::llama_free_model(model);
-                return Err(anyhow!("Failed to create llama.cpp context"));
+                return Err(AppError::Generic(format!("Failed to create llama.cpp context")));
             }
 
             *ctx_guard = Some(LlamaContext {
@@ -314,7 +314,7 @@ fn heuristic_repair_json(input: &str) -> String {
     repaired
 }
 
-fn validate_and_repair_json(raw_json: &str) -> Result<String> {
+fn validate_and_repair_json(raw_json: &str) -> Result<String, AppError> {
     let cleaned = clean_json_markers(raw_json);
     match serde_json::from_str::<contracts::LLMStructuringOutput>(&cleaned) {
         Ok(valid_struct) => {
@@ -359,15 +359,15 @@ fn validate_and_repair_json(raw_json: &str) -> Result<String> {
 
 /// Runs local inference on the given prompt payload synchronously.
 /// Directs extraction tokens directly into local neural pipelines.
-pub fn run_local_inference(prompt: &str) -> Result<String> {
+pub fn run_local_inference(prompt: &str) -> Result<String, AppError> {
     let _ = prompt;
-    let ctx_guard = get_llama_context().lock().map_err(|e| anyhow!("Mutex lock poison error: {}", e))?;
+    let ctx_guard = get_llama_context().lock().map_err(|e| AppError::Generic(format!("Mutex lock poison error: {}", e)))?;
     
     if ctx_guard.is_none() {
-        return Err(anyhow!("llama.cpp context is not initialized. Call initialize_inference_context first."));
+        return Err(AppError::Generic(format!("llama.cpp context is not initialized. Call initialize_inference_context first.")));
     }
     
-    let context = ctx_guard.as_ref().unwrap();
+    let context = ctx_guard.as_ref().ok_or_else(|| AppError::Generic("llama.cpp context missing after check.".to_string()))?;
     println!("[Inference] Feeding prompt to active context. Model: {}, Accelerated: {}", 
              context.model_path, context.hardware_accelerated);
 
@@ -384,9 +384,10 @@ pub fn run_local_inference(prompt: &str) -> Result<String> {
                 let c_prompt = CString::new(prompt)?;
                 
                 // Real FFI tokenization and inference execution
-                let mut tokens = vec![0; 512];
+                let vocab = llama_cpp_sys_2::llama_model_get_vocab(model);
+                let mut tokens = vec![0; 2048];
                 let n_tokens = llama_cpp_sys_2::llama_tokenize(
-                    model,
+                    vocab,
                     c_prompt.as_ptr(),
                     c_prompt.to_bytes().len() as i32,
                     tokens.as_mut_ptr(),
@@ -396,59 +397,73 @@ pub fn run_local_inference(prompt: &str) -> Result<String> {
                 );
 
                 if n_tokens < 0 {
-                    return Err(anyhow!("Tokenization failed. Output exceeded buffer bounds."));
+                    return Err(AppError::Generic(format!("Tokenization failed. Output exceeded buffer bounds.")));
                 }
-
                 tokens.truncate(n_tokens as usize);
 
-                // Run simple batch decode
-                let mut batch = llama_cpp_sys_2::llama_batch_init(tokens.len() as i32, 0, 1);
-                for (i, &token) in tokens.iter().enumerate() {
-                    llama_cpp_sys_2::llama_batch_add(&mut batch, token, i as i32, &[0], i == tokens.len() - 1);
-                }
+                // Add deterministic JSON grammar constraint
+                let is_agent = prompt.contains("AVAILABLE TOOLS:");
+                let gbnf = if is_agent {
+                    r#"root ::= "Thought: " [^\n]* "\n" "{" [^}]* "}""#
+                } else {
+                    r#"root ::= "{" [^}]* "}""#
+                };
+                
+                let grammar_str = CString::new(gbnf)?;
+                let grammar_root = CString::new("root")?;
+                let grammar_sampler = llama_cpp_sys_2::llama_sampler_init_grammar(
+                    vocab,
+                    grammar_str.as_ptr(),
+                    grammar_root.as_ptr(),
+                );
+                
+                let chain_params = llama_cpp_sys_2::llama_sampler_chain_default_params();
+                let chain = llama_cpp_sys_2::llama_sampler_chain_init(chain_params);
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, grammar_sampler);
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_greedy());
 
+                let mut batch = llama_cpp_sys_2::llama_batch_get_one(tokens.as_mut_ptr(), n_tokens as i32);
                 let decode_res = llama_cpp_sys_2::llama_decode(ctx, batch);
-                llama_cpp_sys_2::llama_batch_free(batch);
-
                 if decode_res != 0 {
-                    return Err(anyhow!("llama.cpp decode failed with error code: {}", decode_res));
+                    llama_cpp_sys_2::llama_sampler_free(chain);
+                    return Err(AppError::Generic(format!("llama.cpp decode failed with error code: {}", decode_res)));
                 }
 
-                // Simulate/Mock parsed output inside the real FFI block
-                // (Since Gemma-3-1b structuring prompt returns standard structured blocks JSON)
-                format!(r#"{{
-                    "blocks": [
-                        {{
-                            "block_type": "heading",
-                            "content": {{
-                                "type": "heading",
-                                "level": 2,
-                                "children": [
-                                    {{
-                                        "type": "text",
-                                        "text": "Chapter 1: Local Inference"
-                                    }}
-                                ]
-                            }},
-                            "hyperlink_targets": [],
-                            "semantic_tags": ["offline", "llama", "local"]
-                        }},
-                        {{
-                            "block_type": "paragraph",
-                            "content": {{
-                                "type": "paragraph",
-                                "children": [
-                                    {{
-                                        "type": "text",
-                                        "text": "This is standard layout text processed offline through dynamic on-device llama.cpp neural shaders. Generated from: {}"
-                                    }}
-                                ]
-                            }},
-                            "hyperlink_targets": [],
-                            "semantic_tags": ["npu", "dsp"]
-                        }}
-                    ]
-                }}"#, prompt.replace('"', "\\\""))
+                let mut output_str = String::new();
+                let eos_token = llama_cpp_sys_2::llama_token_eos(vocab);
+
+                for _ in 0..1024 {
+                    let id = llama_cpp_sys_2::llama_sampler_sample(chain, ctx, -1);
+                    llama_cpp_sys_2::llama_sampler_accept(chain, id);
+                    if id == eos_token {
+                        break;
+                    }
+
+                    let mut buf = vec![0u8; 32];
+                    let len = llama_cpp_sys_2::llama_token_to_piece(
+                        vocab, 
+                        id, 
+                        buf.as_mut_ptr() as *mut std::os::raw::c_char, 
+                        buf.len() as i32, 
+                        0, 
+                        false
+                    );
+                    
+                    if len > 0 {
+                        let piece = std::str::from_utf8(&buf[..len as usize]).unwrap_or("");
+                        output_str.push_str(piece);
+                    }
+
+                    let mut id_val = id;
+                    batch = llama_cpp_sys_2::llama_batch_get_one(&mut id_val, 1);
+                    let res = llama_cpp_sys_2::llama_decode(ctx, batch);
+                    if res != 0 {
+                        break;
+                    }
+                }
+
+                llama_cpp_sys_2::llama_sampler_free(chain);
+                output_str
             }
         }
 
@@ -834,6 +849,10 @@ pub fn run_local_inference(prompt: &str) -> Result<String> {
         }
     }
 
+    if prompt.contains("AVAILABLE TOOLS:") {
+        return Ok(output_text);
+    }
+
     let validated = validate_and_repair_json(&output_text)?;
     Ok(validated)
 }
@@ -876,21 +895,26 @@ pub extern "C" fn run_inference_ffi(
 
     // Convert C strings to Rust strings
     let model_path_str = unsafe {
-        CStr::from_ptr(model_path)
-            .to_str()
-            .map_err(|_| ())
-            .expect("Invalid UTF-8 in model path")
+        match CStr::from_ptr(model_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return std::ptr::null_mut(),
+        }
     };
 
     let prompt_str = unsafe {
-        CStr::from_ptr(prompt)
-            .to_str()
-            .map_err(|_| ())
-            .expect("Invalid UTF-8 in prompt")
+        match CStr::from_ptr(prompt).to_str() {
+            Ok(s) => s,
+            Err(_) => return std::ptr::null_mut(),
+        }
     };
 
     // Initialize the context if needed
-    if get_llama_context().lock().unwrap().is_none() {
+    let is_none = match get_llama_context().lock() {
+        Ok(guard) => guard.is_none(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    
+    if is_none {
         if let Err(e) = initialize_inference_context(model_path_str) {
             eprintln!("Failed to initialize inference context: {}", e);
             return std::ptr::null_mut();

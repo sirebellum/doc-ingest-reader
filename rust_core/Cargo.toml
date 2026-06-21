@@ -1,3 +1,3 @@
 [workspace]
-members = ["parser", "inference", "desktop_server", "contracts", "agent_harness"]
+members = ["parser", "inference", "desktop_server", "contracts", "agent_harness", "dbs", "doc_sync"]
 resolver = "2"

@@ -26,8 +26,8 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Circle, Line, G, Text as SvgText } from 'react-native-svg';
-import { db } from '../database/schema';
-import { BLESyncCommunicator } from '../database/bleSync';
+import { DbsBridge } from '../native/DbsBridge';
+import { BLESyncCommunicator } from '../database/docSync';
 import WirelessSyncBridge from '../native/WirelessSyncBridge';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -107,25 +107,13 @@ export default function ConceptGraphScreen() {
     loadGraphData();
   }, []);
 
-  const loadGraphData = () => {
+  const loadGraphData = async () => {
     try {
       // 1. Fetch tags and their linked author signatures
-      const tagRows = (db as any).getAllSync(
-        `SELECT t.id, t.name, t.source, GROUP_CONCAT(DISTINCT a.author_id) as author_ids
-         FROM tags t
-         LEFT JOIN block_tags bt ON t.id = bt.tag_id
-         LEFT JOIN annotations a ON bt.block_id = a.block_id
-         GROUP BY t.id;`
-      ) as Array<{ id: string; name: string; source: string; author_ids: string | null }>;
+      const tagRows = await DbsBridge.getTagsWithAuthorsAsync();
 
       // 2. Fetch co-occurrence connections
-      const linkRows = (db as any).getAllSync(
-        `SELECT bt1.tag_id AS source, bt2.tag_id AS target, COUNT(bt1.block_id) as weight
-         FROM block_tags bt1
-         JOIN block_tags bt2 ON bt1.block_id = bt2.block_id
-         WHERE bt1.tag_id < bt2.tag_id
-         GROUP BY bt1.tag_id, bt2.tag_id;`
-      ) as Array<{ source: string; target: string; weight: number }>;
+      const linkRows = await DbsBridge.getTagCooccurrencesAsync();
 
       // Map rows into graph nodes with initial circle positions
       const mappedNodes: GraphNode[] = tagRows.map((row: any, idx: number) => {
@@ -207,19 +195,11 @@ export default function ConceptGraphScreen() {
   };
 
   // Perform FTS5 plain-text query and slide in Sidebar
-  const handleTagTap = (tagName: string) => {
+  const handleTagTap = async (tagName: string) => {
     setSelectedTag(tagName);
     try {
       const escaped = tagName.replace(/[^\w\s]/g, ' ').trim();
-      const results = (db as any).getAllSync(
-        `SELECT b.id, b.content, d.title as doc_title
-         FROM blocks b
-         JOIN blocks_fts fts ON b.id = fts.block_id
-         JOIN documents d ON b.document_id = d.id
-         WHERE fts.content MATCH ?
-         LIMIT 20;`,
-        [`"${escaped}"`]
-      ) as Array<{ id: string; content: string; doc_title: string }>;
+      const results = await DbsBridge.searchBlocksAsync(escaped);
       setMatchingBlocks(results);
       drawerX.value = withSpring(screenWidth * 0.25); // slide in
     } catch (err) {
@@ -269,7 +249,7 @@ export default function ConceptGraphScreen() {
       const communicator = new BLESyncCommunicator();
 
       // Find a document to synchronize
-      const doc = (db as any).getFirstSync('SELECT id FROM documents LIMIT 1;') as { id: string } | null;
+      const doc = await DbsBridge.getFirstDocumentIdAsync();
       if (!doc) {
         setBleLogs((prev) => [...prev, '[Error] No documents found to sync deltas!']);
         setBleProgress(100);
@@ -278,7 +258,7 @@ export default function ConceptGraphScreen() {
 
       // Setup physical receiver listener for inbound chunks
       const inboundListener = communicator.setupPhysicalListener(
-        db,
+        undefined as any,
         (progress) => {
           setBleProgress(progress);
         },
@@ -316,7 +296,7 @@ export default function ConceptGraphScreen() {
           
           // Send outbound delta physically
           await communicator.sendDeltaPhysically(
-            db,
+            undefined as any,
             doc.id,
             '1970-01-01T00:00:00Z',
             device.id,
@@ -373,11 +353,9 @@ export default function ConceptGraphScreen() {
   };
 
   // Launch split pane modal to resolve git-style inline conflict blocks
-  const launchConflictEditor = () => {
+  const launchConflictEditor = async () => {
     // Look up any annotations in database containing git conflict markers
-    const conflicts = (db as any).getAllSync(
-      "SELECT id, note_body FROM annotations WHERE note_body LIKE '%<<<<<<< OURS%';"
-    ) as Array<{ id: string; note_body: string }>;
+    const conflicts = await DbsBridge.getConflictingAnnotationsAsync();
 
     if (conflicts.length > 0) {
       const active = conflicts[0];
@@ -400,14 +378,11 @@ export default function ConceptGraphScreen() {
   };
 
   // Write finalized resolution back to SQLite
-  const commitConflictResolution = () => {
+  const commitConflictResolution = async () => {
     if (!activeConflictId) return;
 
     try {
-      db.runSync(
-        'UPDATE annotations SET note_body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;',
-        [resolvedText, activeConflictId]
-      );
+      await DbsBridge.resolveAnnotationConflictAsync(activeConflictId, resolvedText);
       setConflictModalVisible(false);
       Alert.alert('Success', 'The note conflict has been successfully resolved and saved.');
       loadGraphData();

@@ -1,30 +1,11 @@
 import React from 'react';
 import { StyleSheet, View, Text, Image, ScrollView, TouchableOpacity, useWindowDimensions, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
-import type { ASTNode } from '../shared/types/ASTNode';
+import type { Block } from "../../../rust_core/contracts/bindings/Block"; export type { Block } from "../../../rust_core/contracts/bindings/Block";
+import type { Annotation } from "../../../rust_core/contracts/bindings/Annotation"; export type { Annotation } from "../../../rust_core/contracts/bindings/Annotation";
+import type { ASTNode } from '../../../rust_core/contracts/bindings/ASTNode';
 
-export interface Block {
-  id: string;
-  section_id: string;
-  document_id: string;
-  block_type: string;
-  content: string;
-  sort_order: number;
-  estimated_height?: number;
-}
 
-export interface Annotation {
-  id: string;
-  document_id: string;
-  block_id: string | null;
-  annotation_type: string;
-  color_code: string;
-  highlighted_text: string | null;
-  note_body: string | null;
-  anchor_metadata: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
 
 export interface BlockCellProps {
   block: Block;

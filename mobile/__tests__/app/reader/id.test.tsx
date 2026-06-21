@@ -1,7 +1,7 @@
 import React from 'react';
 import { create, act } from 'react-test-renderer';
 import { useLocalSearchParams } from 'expo-router';
-import { db } from '../../../src/database/schema';
+import { DbsBridge } from '../../../src/native/DbsBridge';
 import { useDatabaseSync } from '../../../src/hooks/useDatabaseSync';
 import { FlashListReader, NoteEditor } from '../../../src/components';
 import BottomSheet from '@gorhom/bottom-sheet';
@@ -69,13 +69,18 @@ jest.mock('../../../src/hooks/useDatabaseSync', () => ({
   useDatabaseSync: () => mockUseDatabaseSyncValue,
 }));
 
-// Mock Database Schema
-const mockGetAllAsync = jest.fn();
-const mockRunAsync = jest.fn();
-jest.mock('../../../src/database/schema', () => ({
-  db: {
-    getAllAsync: (...args: any[]) => mockGetAllAsync(...args),
-    runAsync: (...args: any[]) => mockRunAsync(...args),
+// Mock DbsBridge
+const mockGetBlocksForSectionAsync = jest.fn();
+const mockGetAnnotationsForBlocksAsync = jest.fn();
+const mockSaveAnnotationAsync = jest.fn();
+const mockDeleteAnnotationAsync = jest.fn();
+
+jest.mock('../../../src/native/DbsBridge', () => ({
+  DbsBridge: {
+    getBlocksForSectionAsync: (...args: any[]) => mockGetBlocksForSectionAsync(...args),
+    getAnnotationsForBlocksAsync: (...args: any[]) => mockGetAnnotationsForBlocksAsync(...args),
+    saveAnnotationAsync: (...args: any[]) => mockSaveAnnotationAsync(...args),
+    deleteAnnotationAsync: (...args: any[]) => mockDeleteAnnotationAsync(...args),
   },
 }));
 
@@ -121,7 +126,7 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
   });
 
   it('should render the smartphone reading layout correctly (shows title and active reader pane)', async () => {
-    mockGetAllAsync.mockResolvedValue([]); // Mock block fetches
+    mockGetBlocksForSectionAsync.mockResolvedValue([]);
 
     let renderTree: any;
     await act(async () => {
@@ -142,7 +147,7 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
   it('should render the tablet split layout correctly (shows Left Sidebar and Right Note Sidebar when note is active)', async () => {
     // Mock tablet window dimensions
     (useWindowDimensions as jest.Mock).mockReturnValue({ width: 1024, height: 768 });
-    mockGetAllAsync.mockResolvedValue([]);
+    mockGetBlocksForSectionAsync.mockResolvedValue([]);
 
     let renderTree: any;
     await act(async () => {
@@ -166,7 +171,7 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
   });
 
   it('should call loadSectionsForDocument on mount with parameters from route search params', async () => {
-    mockGetAllAsync.mockResolvedValue([]);
+    mockGetBlocksForSectionAsync.mockResolvedValue([]);
 
     await act(async () => {
       create(<ReadingScreen />);
@@ -183,10 +188,8 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
       { id: 'a1', document_id: 'doc-1', block_id: 'b1', annotation_type: 'highlight', color_code: 'yellow' }
     ];
 
-    // Mock sequential SQLite calls: blocks list, then annotations matching blocks
-    mockGetAllAsync
-      .mockResolvedValueOnce(mockBlocks)
-      .mockResolvedValueOnce(mockAnnotations);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue(mockAnnotations);
 
     let renderTree: any;
     await act(async () => {
@@ -197,8 +200,8 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
       await Promise.resolve();
     });
 
-    expect(mockGetAllAsync).toHaveBeenNthCalledWith(1, 'SELECT * FROM blocks WHERE section_id = ? ORDER BY sort_order ASC', ['sec-1']);
-    expect(mockGetAllAsync).toHaveBeenNthCalledWith(2, expect.stringContaining("SELECT * FROM annotations WHERE block_id IN ('b1')"));
+    expect(mockGetBlocksForSectionAsync).toHaveBeenCalledWith('sec-1');
+    expect(mockGetAnnotationsForBlocksAsync).toHaveBeenCalledWith(['b1']);
 
     const flashList = renderTree.root.findByType(FlashListReader);
     expect(flashList.props.blocks).toEqual(mockBlocks);
@@ -206,7 +209,8 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
 
   it('should trigger bottom sheet expand on smartphone floating annotate button press', async () => {
     const mockBlocks = [{ id: 'b1', document_id: 'doc-1', section_id: 'sec-1', block_type: 'paragraph', content: 'Mock Content text here.' }];
-    mockGetAllAsync.mockResolvedValue(mockBlocks);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue([]);
 
     let renderTree: any;
     await act(async () => {
@@ -249,7 +253,8 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
   it('should show NoteEditor right sidebar in tablet profile when text is highlighted and floating button is clicked', async () => {
     (useWindowDimensions as jest.Mock).mockReturnValue({ width: 1024, height: 768 });
     const mockBlocks = [{ id: 'b1', document_id: 'doc-1', section_id: 'sec-1', block_type: 'paragraph', content: 'Mock Content.' }];
-    mockGetAllAsync.mockResolvedValue(mockBlocks);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue([]);
 
     let renderTree: any;
     await act(async () => {
@@ -287,8 +292,9 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
 
   it('should insert a new highlight annotation into SQLite when save is called on new note via floating button flow', async () => {
     const mockBlocks = [{ id: 'b1', document_id: 'doc-1', section_id: 'sec-1', block_type: 'paragraph', content: 'New Text content.' }];
-    mockGetAllAsync.mockResolvedValue(mockBlocks);
-    mockRunAsync.mockResolvedValueOnce(undefined);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue([]);
+    mockSaveAnnotationAsync.mockResolvedValue(undefined);
 
     let renderTree: any;
     await act(async () => {
@@ -324,9 +330,13 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
       await noteEditor.props.onSave('yellow', 'My new notes.', ['sqlite'], 'Mock Highlight Text');
     });
 
-    expect(mockRunAsync).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO annotations'),
-      expect.arrayContaining(['doc-1', 'b1', 'highlight', 'yellow'])
+    expect(mockSaveAnnotationAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document_id: 'doc-1',
+        block_id: 'b1',
+        annotation_type: 'highlight',
+        color_code: 'yellow'
+      })
     );
     expect(mockClose).toHaveBeenCalled(); // BottomSheet closed after save
     window.getSelection = originalGetSelection;
@@ -335,11 +345,10 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
   it('should update highlight annotation in SQLite when save is called on existing note', async () => {
     const mockBlocks = [{ id: 'b1', document_id: 'doc-1', section_id: 'sec-1', content: 'Some text.' }];
     const mockAnnotations = [{ id: 'a1', document_id: 'doc-1', block_id: 'b1', annotation_type: 'highlight', color_code: 'yellow', note_body: 'Old note' }];
-    mockGetAllAsync
-      .mockResolvedValueOnce(mockBlocks)
-      .mockResolvedValueOnce(mockAnnotations);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue(mockAnnotations);
     
-    mockRunAsync.mockResolvedValueOnce(undefined);
+    mockSaveAnnotationAsync.mockResolvedValue(undefined);
 
     let renderTree: any;
     await act(async () => {
@@ -364,20 +373,22 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
       await noteEditor.props.onSave('blue', 'Updated note content.', ['sqlite']);
     });
 
-    expect(mockRunAsync).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE annotations SET color_code = ?, note_body = ?, highlighted_text = ?, updated_at = ? WHERE id = ?'),
-      expect.arrayContaining(['blue', 'Updated note content.', 'a1'])
+    expect(mockSaveAnnotationAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'a1',
+        color_code: 'blue',
+        note_body: 'Updated note content.'
+      })
     );
   });
 
   it('should delete annotations from SQLite when delete is pressed inside NoteEditor', async () => {
     const mockBlocks = [{ id: 'b1', document_id: 'doc-1', section_id: 'sec-1', content: 'Some text.' }];
     const mockAnnotations = [{ id: 'a1', document_id: 'doc-1', block_id: 'b1', annotation_type: 'highlight', color_code: 'yellow', note_body: 'Delete me.' }];
-    mockGetAllAsync
-      .mockResolvedValueOnce(mockBlocks)
-      .mockResolvedValueOnce(mockAnnotations);
+    mockGetBlocksForSectionAsync.mockResolvedValue(mockBlocks);
+    mockGetAnnotationsForBlocksAsync.mockResolvedValue(mockAnnotations);
     
-    mockRunAsync.mockResolvedValueOnce(undefined);
+    mockDeleteAnnotationAsync.mockResolvedValue(undefined);
 
     let renderTree: any;
     await act(async () => {
@@ -401,9 +412,6 @@ describe('ReadingScreen (reader/[id]) Screen Component Tests', () => {
       await noteEditor.props.onDelete();
     });
 
-    expect(mockRunAsync).toHaveBeenCalledWith(
-      'DELETE FROM annotations WHERE id = ?',
-      ['a1']
-    );
+    expect(mockDeleteAnnotationAsync).toHaveBeenCalledWith('a1');
   });
 });

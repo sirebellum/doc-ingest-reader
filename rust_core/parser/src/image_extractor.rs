@@ -2,7 +2,7 @@ use std::path::Path;
 use std::fs::{self, File};
 use std::io::Write;
 use sha2::{Digest, Sha256};
-use anyhow::Result;
+use contracts::error::AppError;
 use pdfium_render::prelude::{PdfPageObjectsCommon, PdfPageObjectCommon};
 use crate::ExtractedImageMetadata;
 
@@ -12,12 +12,11 @@ impl ImageExtractor {
     pub fn extract_images_from_page(
         page: &pdfium_render::prelude::PdfPage,
         doc: &pdfium_render::prelude::PdfDocument,
-        lopdf_doc: &lopdf::Document,
         page_number: u32,
         page_width: f32,
         page_height: f32,
         output_dir: &Path
-    ) -> Result<Vec<ExtractedImageMetadata>> {
+    ) -> Result<Vec<ExtractedImageMetadata>, AppError> {
         let mut extracted_images = Vec::new();
         let _ = fs::create_dir_all(output_dir);
         
@@ -56,32 +55,6 @@ impl ImageExtractor {
                             }
                         }
                         let _ = fs::remove_file(&temp_path);
-                    }
-                }
-                
-                if !saved_successfully {
-                    for (_obj_id, obj) in lopdf_doc.objects.iter() {
-                        if let Ok(stream) = obj.as_stream() {
-                            if let Ok(subtype) = stream.dict.get(b"Subtype") {
-                                if subtype.as_name().ok() == Some(b"Image" as &[u8]) {
-                                    if let Ok(raw_data) = stream.decompressed_content() {
-                                        let mut hasher = Sha256::new();
-                                        hasher.update(&raw_data);
-                                        hash = format!("{:x}", hasher.finalize());
-                                        
-                                        let final_filename = format!("{}_{}.png", hash, image_id);
-                                        let final_path = output_dir.join(&final_filename);
-                                        
-                                        if let Ok(mut file) = File::create(&final_path) {
-                                            if file.write_all(&raw_data).is_ok() {
-                                                saved_successfully = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
                 

@@ -6,6 +6,9 @@ if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
   }
 }
 
+import type { PageExtraction } from "../../../rust_core/contracts/bindings/PageExtraction";
+import type { ExtractedImageMetadata } from "../../../rust_core/contracts/bindings/ExtractedImageMetadata";
+import type { LayoutHint } from "../../../rust_core/contracts/bindings/LayoutHint";
 import { Platform } from 'react-native';
 
 let ExpoRustParserBridgeModule: any = null;
@@ -16,31 +19,8 @@ try {
   // Ignore
 }
 
-export interface BoundingBox {
-  bounding_box: [number, number, number, number];
-  font_size: number;
-  text_snippet: string;
-}
 
-export interface ExtractedImage {
-  image_id: string;
-  sha256_hash: string;
-  bounding_box: [number, number, number, number];
-  page_width: number;
-  page_height: number;
-  local_uri: string;
-}
 
-export interface ExtractedPage {
-  document_id: string;
-  page_number: number;
-  overlap_context: string;
-  raw_text: string;
-  layout_hints: BoundingBox[];
-  extracted_images?: ExtractedImage[];
-  is_mock?: boolean;
-  origin?: string;
-}
 
 export interface NpuConfig {
   useAppleNeuralEngine: boolean;
@@ -608,7 +588,7 @@ export const RustParserBridge = {
       });
     }
 
-    const mockResult: ExtractedPage = {
+    const mockResult: PageExtraction & { is_mock?: boolean; origin?: string } = {
       document_id: `doc-${localPath.split('/').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'dummy'}`,
       page_number: 1,
       overlap_context: 'synthetic_simulation_stub_overlap_context',

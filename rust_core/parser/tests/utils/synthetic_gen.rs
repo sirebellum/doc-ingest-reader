@@ -2,7 +2,7 @@ use printpdf::*;
 use serde::{Serialize, Deserialize};
 use std::fs::File;
 use std::io::BufWriter;
-use anyhow::{anyhow, Result};
+use contracts::error::AppError;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TocItem {
@@ -34,16 +34,16 @@ pub struct SyntheticInput {
     pub strip_index_from_pdf: bool,
 }
 
-pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Result<()> {
+pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Result<(), AppError> {
     // 1. Initialize Document (Letter: 612 x 792 points)
     let (doc, page1, layer1) = PdfDocument::new(&input.title, Pt(612.0).into(), Pt(792.0).into(), "Layer 1");
     let current_layer = doc.get_page(page1).get_layer(layer1);
     
     // Load standard Helvetica font
     let font = doc.add_builtin_font(BuiltinFont::HelveticaBold)
-        .map_err(|e| anyhow!("Failed to load bold font: {:?}", e))?;
+        .map_err(|e| AppError::Generic(format!("Failed to load bold font: {:?}", e)))?;
     let font_regular = doc.add_builtin_font(BuiltinFont::Helvetica)
-        .map_err(|e| anyhow!("Failed to load regular font: {:?}", e))?;
+        .map_err(|e| AppError::Generic(format!("Failed to load regular font: {:?}", e)))?;
 
     // Draw explicit running header/footer (PostScript points)
     current_layer.set_outline_color(Color::Rgb(Rgb::new(0.7, 0.7, 0.7, None)));
@@ -174,7 +174,7 @@ pub fn generate_synthetic_pdf(output_path: &str, input: &SyntheticInput) -> Resu
     // Save PDF output
     let file = File::create(output_path)?;
     doc.save(&mut BufWriter::new(file))
-        .map_err(|e| anyhow!("Failed to save PDF: {:?}", e))?;
+        .map_err(|e| AppError::Generic(format!("Failed to save PDF: {:?}", e)))?;
     
     Ok(())
 }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use contracts::error::AppError;
 use rusqlite::Connection;
 use contracts::ExtractionChunk;
 use std::ffi::{CStr, c_void};
@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 
 /// Ingests a raw extraction chunk into the agent database, enforcing a ~200 token hard limit
 /// per block by splitting text based on paragraphs/sentences.
-pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -> Result<()> {
+pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -> Result<(), AppError> {
     // Basic heuristic: 1 word ~ 1.3 tokens. So 200 tokens ~ 150 words.
     let max_words = 150;
     
@@ -19,7 +19,7 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
     let mut current_word_count = 0;
     let mut sequence_order = 0;
 
-    let mut insert_block = |content: &str, token_count: i64| -> Result<()> {
+    let mut insert_block = |content: &str, token_count: i64| -> Result<(), AppError> {
         let id = format!("raw-{}-{}", extraction.chunk_index, sequence_order);
         let doc_id = &extraction.document_id;
         
@@ -29,7 +29,7 @@ pub fn ingest_chunk_to_agent_db(db: &Connection, extraction: &ExtractionChunk) -
             "INSERT INTO pass1_chunks (id, document_id, raw_layout_text, chunk_token_count, overlap_buffer) 
              VALUES (?1, ?2, ?3, ?4, NULL)",
             rusqlite::params![id, doc_id, content, token_count]
-        )?;
+        ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
         sequence_order += 1;
         Ok(())
     };

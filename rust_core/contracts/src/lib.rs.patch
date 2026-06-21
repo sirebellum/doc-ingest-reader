@@ -1,0 +1,26 @@
+--- rust_core/contracts/src/lib.rs
++++ rust_core/contracts/src/lib.rs
+@@ -235,2 +235,3 @@
+     pub sort_order: i32,
++    #[ts(optional)]
+     pub estimated_height: Option<f32>,
+@@ -242,5 +243,9 @@
+     pub block_id: Option<String>,
+     pub annotation_type: String,
+     pub color_code: String,
++    #[ts(optional)]
+     pub highlighted_text: Option<String>,
++    #[ts(optional)]
+     pub note_body: Option<String>,
++    #[ts(optional)]
+     pub anchor_metadata: Option<String>,
++    #[ts(optional)]
+     pub created_at: Option<String>,
++    #[ts(optional)]
+     pub updated_at: Option<String>,
+@@ -258,2 +263,4 @@
+     pub sha256_hash: String,
++    #[ts(optional)]
+     pub author: Option<String>,
++    #[ts(optional)]
+     pub source_type: Option<String>,

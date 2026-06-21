@@ -1,9 +1,11 @@
 use serde::{Serialize, Deserialize};
 use ts_rs::TS;
 
+pub mod error;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../mobile/src/shared/types/BlockType.ts")]
+#[ts(export)]
 pub enum BlockType {
     Heading,
     Paragraph,
@@ -15,7 +17,7 @@ pub enum BlockType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ASTNode.ts")]
+#[ts(export)]
 pub enum ASTNode {
     Heading {
         level: u8,
@@ -62,13 +64,13 @@ pub enum ASTNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/TableRow.ts")]
+#[ts(export)]
 pub struct TableRow {
     pub cells: Vec<TableCell>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/TableCell.ts")]
+#[ts(export)]
 pub struct TableCell {
     pub children: Vec<ASTNode>,
     #[serde(default)]
@@ -77,13 +79,13 @@ pub struct TableCell {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ListItem.ts")]
+#[ts(export)]
 pub struct ListItem {
     pub children: Vec<ASTNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractedBlock.ts")]
+#[ts(export)]
 pub struct ExtractedBlock {
     pub block_type: BlockType,
     pub content: ASTNode,
@@ -92,13 +94,13 @@ pub struct ExtractedBlock {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/LLMStructuringOutput.ts")]
+#[ts(export)]
 pub struct LLMStructuringOutput {
     pub blocks: Vec<ExtractedBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/LayoutHint.ts")]
+#[ts(export)]
 pub struct LayoutHint {
     pub bounding_box: [f32; 4],
     pub font_size: f32,
@@ -106,7 +108,7 @@ pub struct LayoutHint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractedImageMetadata.ts")]
+#[ts(export)]
 pub struct ExtractedImageMetadata {
     pub image_id: String,
     pub sha256_hash: String,
@@ -117,7 +119,7 @@ pub struct ExtractedImageMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/PageExtraction.ts")]
+#[ts(export)]
 pub struct PageExtraction {
     pub document_id: String,
     pub page_number: u32,
@@ -128,7 +130,7 @@ pub struct PageExtraction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractionChunk.ts")]
+#[ts(export)]
 pub struct ExtractionChunk {
     pub document_id: String,
     pub chunk_index: u32,
@@ -136,7 +138,7 @@ pub struct ExtractionChunk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/StructuredSection.ts")]
+#[ts(export)]
 pub struct StructuredSection {
     pub id: String,
     pub parent_id: Option<String>,
@@ -146,7 +148,7 @@ pub struct StructuredSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/StructuredBlock.ts")]
+#[ts(export)]
 pub struct StructuredBlock {
     pub id: String,
     pub section_id: String,
@@ -158,19 +160,19 @@ pub struct StructuredBlock {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/MultiFormatExtraction.ts")]
+#[ts(export)]
 pub struct MultiFormatExtraction {
     pub document_id: String,
     pub source_type: String,
     pub title: String,
-    pub author: Option<String>,
+    #[ts(optional)] pub author: Option<String>,
     pub sections: Vec<StructuredSection>,
     pub blocks: Vec<StructuredBlock>,
     pub extracted_images: Vec<ExtractedImageMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/DocumentIndexItem.ts")]
+#[ts(export)]
 pub struct DocumentIndexItem {
     pub title: String,
     pub page_start: u32,
@@ -178,14 +180,14 @@ pub struct DocumentIndexItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "../../../mobile/src/shared/types/DocumentIndex.ts")]
+#[ts(export)]
 pub struct DocumentIndex {
     pub items: Vec<DocumentIndexItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-#[ts(export, export_to = "../../../mobile/src/shared/types/ExtractedMetadata.ts")]
+#[ts(export)]
 pub enum ExtractedMetadata {
     Index(DocumentIndex),
     Tags(Vec<String>),
@@ -196,7 +198,7 @@ pub enum ExtractedMetadata {
 mod tests {
     #[test]
     fn test_export() {
-        // Handled automatically by #[ts(export, export_to = "...")]
+        // Handled automatically by #[ts(export)]
     }
 }
 
@@ -222,4 +224,56 @@ macro_rules! log_debug {
             println!("[DEBUG][{}][{}::{}] -> {} | {}", epoch_ms, $subsystem, $module, $msg, $metrics);
         }
     };
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct Block {
+    pub id: String,
+    pub section_id: String,
+    pub document_id: String,
+    pub block_type: String,
+    pub content: String,
+    pub sort_order: i32,
+    #[ts(optional)] pub estimated_height: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export)]
+pub struct Annotation {
+    pub id: String,
+    pub document_id: String,
+    pub block_id: Option<String>,
+    pub annotation_type: String,
+    pub color_code: String,
+    #[ts(optional)] pub highlighted_text: Option<String>,
+    #[ts(optional)] pub note_body: Option<String>,
+    #[ts(optional)] pub anchor_metadata: Option<String>,
+    #[ts(optional)] pub created_at: Option<String>,
+    #[ts(optional)] pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export)]
+pub struct Corpus {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export)]
+pub struct Document {
+    pub id: String,
+    pub title: String,
+    pub sha256_hash: String,
+    #[ts(optional)] pub author: Option<String>,
+    #[ts(optional)] pub source_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export)]
+pub struct Section {
+    pub id: String,
+    pub title: String,
+    pub sort_order: i32,
 }

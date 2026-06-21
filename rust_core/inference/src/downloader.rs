@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use contracts::error::AppError;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, RANGE};
 use sha2::{Digest, Sha256};
@@ -11,7 +11,7 @@ pub struct ModelDownloader;
 
 impl ModelDownloader {
     /// Computes the SHA-256 hash of a file.
-    pub fn compute_sha256(path: &Path) -> Result<String> {
+    pub fn compute_sha256(path: &Path) -> Result<String, AppError> {
         let mut file = File::open(path)?;
         let mut hasher = Sha256::new();
         let mut buffer = [0; 65536];
@@ -26,10 +26,10 @@ impl ModelDownloader {
     }
 
     /// Validates that the target path is inside a secure folder.
-    pub fn validate_sandbox_path(path: &Path) -> Result<()> {
+    pub fn validate_sandbox_path(path: &Path) -> Result<(), AppError> {
         let path_str = path.to_string_lossy();
         if path_str.contains("..") {
-            return Err(anyhow!("Sandbox violation: path traversal detected in {:?}", path));
+            return Err(AppError::Generic(format!("Sandbox violation: path traversal detected in {:?}", path)));
         }
         Ok(())
     }
@@ -41,7 +41,7 @@ impl ModelDownloader {
         target_path: &Path,
         expected_sha256: Option<&str>,
         progress_callback: Option<F>,
-    ) -> Result<()>
+    ) -> Result<(), AppError>
     where
         F: Fn(f64) + Send + Sync + 'static,
     {
@@ -101,21 +101,21 @@ impl ModelDownloader {
                                     .write(true)
                                     .create_new(true)
                                     .open(&lock_path)
-                                    .map_err(|_| anyhow!("Failed to acquire newly cleared lock file"))?
+                                    .map_err(|_| AppError::Generic(format!("Failed to acquire newly cleared lock file")))?
                             } else {
-                                return Err(anyhow!("Another download operation is currently in progress."));
+                                return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
                             }
                         } else {
-                            return Err(anyhow!("Another download operation is currently in progress."));
+                            return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
                         }
                     } else {
-                        return Err(anyhow!("Another download operation is currently in progress."));
+                        return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
                     }
                 } else {
-                    return Err(anyhow!("Another download operation is currently in progress."));
+                    return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
                 }
             }
-            Err(e) => return Err(anyhow!("Failed to create lock file: {:?}", e)),
+            Err(e) => return Err(AppError::Generic(format!("Failed to create lock file: {:?}", e))),
         };
 
         // Ensure the lock is cleaned up on exit
@@ -131,7 +131,8 @@ impl ModelDownloader {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(15))
-            .build()?;
+            .build()
+            .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
         let mut retries = 3;
         let mut backoff = Duration::from_secs(2);
@@ -151,7 +152,12 @@ impl ModelDownloader {
 
             let mut headers = HeaderMap::new();
             if downloaded_bytes > 0 {
-                headers.insert(RANGE, format!("bytes={}-", downloaded_bytes).parse()?);
+                headers.insert(
+                    RANGE,
+                    format!("bytes={}-", downloaded_bytes)
+                        .parse()
+                        .map_err(|e| AppError::NetworkError(format!("Invalid range header: {}", e)))?,
+                );
             }
 
             let request_res = client
@@ -166,7 +172,7 @@ impl ModelDownloader {
                         println!("[ModelDownloader] Server returned error status: {}", status);
                         retries -= 1;
                         if retries == 0 {
-                            return Err(anyhow!("Download failed: Server returned status {}", status));
+                            return Err(AppError::Generic(format!("Download failed: Server returned status {}", status)));
                         }
                         std::thread::sleep(backoff);
                         backoff *= 2;
@@ -218,7 +224,7 @@ impl ModelDownloader {
                             Ok(0) => break, // EOF reached
                             Ok(n) => {
                                 if let Err(e) = file.write_all(&buffer[..n]) {
-                                    download_error = Some(anyhow!("Failed to write to part file: {:?}", e));
+                                    download_error = Some(AppError::Generic(format!("Failed to write to part file: {:?}", e)));
                                     break;
                                 }
                                 total_downloaded += n as u64;
@@ -231,7 +237,7 @@ impl ModelDownloader {
                                 }
                             }
                             Err(e) => {
-                                download_error = Some(anyhow!("Network read error: {:?}", e));
+                                download_error = Some(AppError::Generic(format!("Network read error: {:?}", e)));
                                 break;
                             }
                         }
@@ -256,7 +262,7 @@ impl ModelDownloader {
                     println!("[ModelDownloader] Connection attempt failed: {:?}", e);
                     retries -= 1;
                     if retries == 0 {
-                        return Err(anyhow!("Connection failed: {:?}", e));
+                        return Err(AppError::Generic(format!("Connection failed: {:?}", e)));
                     }
                     std::thread::sleep(backoff);
                     backoff *= 2;
@@ -270,11 +276,11 @@ impl ModelDownloader {
             if !actual_hash.eq_ignore_ascii_case(expected) {
                 // Mismatch: Roll back / delete corrupted file to protect local storage
                 let _ = fs::remove_file(&part_path);
-                return Err(anyhow!(
+                return Err(AppError::Generic(format!(
                     "SHA-256 hash mismatch! Expected: {}, Got: {}. Deleted temporary part file.",
                     expected,
                     actual_hash
-                ));
+                )));
             }
         }
 

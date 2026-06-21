@@ -1,12 +1,16 @@
 //! Rust-based PDF layout analysis & parsing library.
 //! Handles Pass 1 extraction of content streams and high-fidelity boundary geometries.
 
-use anyhow::{anyhow, Result};
+use contracts::error::AppError;
 use std::path::Path;
-use std::fs::{self, File};
-use std::io::Write;
+
 use sha2::{Digest, Sha256};
 use pdfium_render::prelude::PdfPageObjectsCommon;
+
+use std::cell::RefCell;
+thread_local! {
+    static PDFIUM_INSTANCE: RefCell<Option<pdfium_render::prelude::Pdfium>> = RefCell::new(None);
+}
 
 // Force linking agent_harness FFI symbols in static library builds
 // #[allow(unused_imports)]
@@ -26,10 +30,10 @@ pub use contracts::{
 /// Trait defining the core PDF extraction interface
 pub trait PdfExtractor {
     /// Extracts a page from a PDF document
-    fn extract_page(&self, page_number: u32) -> Result<PageExtraction>;
+    fn extract_page(&self, page_number: u32) -> Result<PageExtraction, AppError>;
 
     /// Extracts all images from the PDF document and saves them to the sandbox directory
-    fn extract_images(&self, output_dir: &str) -> Result<Vec<String>>;
+    fn extract_images(&self, output_dir: &str) -> Result<Vec<String>, AppError>;
 }
 
 /// Mock PDF extractor implementation for simulator testing
@@ -38,7 +42,7 @@ pub struct MockPdfExtractor {
 }
 
 impl PdfExtractor for MockPdfExtractor {
-    fn extract_page(&self, page_number: u32) -> Result<PageExtraction> {
+    fn extract_page(&self, page_number: u32) -> Result<PageExtraction, AppError> {
         Ok(PageExtraction {
             document_id: self.document_id.clone(),
             page_number,
@@ -55,7 +59,7 @@ impl PdfExtractor for MockPdfExtractor {
         })
     }
 
-    fn extract_images(&self, _output_dir: &str) -> Result<Vec<String>> {
+    fn extract_images(&self, _output_dir: &str) -> Result<Vec<String>, AppError> {
         Ok(vec!["mock_image_synthetic_simulation_stub_1.png".to_string()])
     }
 }
@@ -70,11 +74,11 @@ pub struct RealPdfExtractor {
 
 impl RealPdfExtractor {
     /// Dynamically loads and initializes the PDFium engine with a robust fallback search path.
-    fn init_pdfium() -> Result<pdfium_render::prelude::Pdfium> {
+    pub fn init_pdfium() -> Result<pdfium_render::prelude::Pdfium, AppError> {
         use pdfium_render::prelude::Pdfium;
         
         // Attempt standard dynamic library binding across paths
-        let binding = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+        println!("binding pdfium..."); let binding = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
             .or_else(|_| Pdfium::bind_to_system_library())
             .or_else(|e| {
                 // Additional cross-platform fallback locations for mobile assets/native partitions
@@ -94,282 +98,268 @@ impl RealPdfExtractor {
 
         match binding {
             Ok(bind) => Ok(Pdfium::new(bind)),
-            Err(e) => Err(anyhow!("PDFium initialization failed. Ensure PDFium shared library is present in platform search paths: {:?}", e)),
+            Err(e) => Err(AppError::Generic(format!("PDFium initialization failed. Ensure PDFium shared library is present in platform search paths: {:?}", e))),
         }
     }
 }
 
 impl PdfExtractor for RealPdfExtractor {
-    fn extract_page(&self, page_number: u32) -> Result<PageExtraction> {
-        // 1. Double-source content stream loading:
-        // Use lopdf to parse low-level stream resources if needed
-        let lopdf_doc = lopdf::Document::load(&self.pdf_path)?;
-        
-        // 2. High-fidelity geometry extraction via pdfium-render
-        let pdfium = Self::init_pdfium()?;
-        let doc = pdfium.load_pdf_from_file(&self.pdf_path, None)?;
-        let page = doc.pages().get((page_number - 1) as u16)?;
-        
-        // Retrieve physical page bounds (PostScript points: 1/72 inch)
-        let page_width = page.width().value;
-        let page_height = page.height().value;
-        let mid_x = page_width / 2.0;
-        
-        let page_text = page.text()?;
-        
-        // Accumulate character segments with high-fidelity coordinate systems
-        let mut segments: Vec<LayoutHint> = Vec::new();
-        
-        // Segment boundaries and double-column clustering preparation
-        let mut current_snippet = String::new();
-        let mut current_bbox: Option<BoundingBox> = None;
-        let mut current_font_size = 0.0;
-        
-        for c in page_text.chars().iter() {
-            if let Ok(rects) = c.loose_bounds() {
-                let rect = [
-                    rects.left().value,
-                    rects.bottom().value,
-                    rects.right().value,
-                    rects.top().value,
-                ];
-                
-                let char_str = c.unicode_string().unwrap_or_default();
-                let font_size = c.text_object().map(|obj| obj.unscaled_font_size().value).unwrap_or(10.0);
-                
-                contracts::log_debug!(
-                    "PASS_1",
-                    "Parser",
-                    format!("Geometric coordinate mapping -> Char: '{}'", char_str),
-                    format!("BBox: [{}, {}, {}, {}], FontSize: {}pt, Status: Success", rect[0], rect[1], rect[2], rect[3], font_size)
-                );
-                
-                // Simple word/token segmentation based on whitespace characters
-                if char_str.trim().is_empty() {
-                    if !current_snippet.is_empty() {
-                        if let Some(bbox) = current_bbox {
-                            contracts::log_debug!(
-                                "PASS_1",
-                                "Parser",
-                                format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
-                                format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
-                            );
-                            segments.push(LayoutHint {
-                                bounding_box: bbox,
-                                font_size: current_font_size,
-                                text_snippet: current_snippet.clone(),
-                            });
-                        }
-                        current_snippet.clear();
-                        current_bbox = None;
-                    }
-                } else {
-                    current_snippet.push_str(&char_str);
-                    current_font_size = font_size;
-                    match current_bbox {
-                        None => current_bbox = Some(rect),
-                        Some(ref mut bbox) => {
-                            bbox[0] = bbox[0].min(rect[0]);
-                            bbox[1] = bbox[1].min(rect[1]);
-                            bbox[2] = bbox[2].max(rect[2]);
-                            bbox[3] = bbox[3].max(rect[3]);
-                        }
-                    }
+    fn extract_page(&self, page_number: u32) -> Result<PageExtraction, AppError> {
+        PDFIUM_INSTANCE.with(|pdfium_cell| {
+            let mut pdfium_opt = pdfium_cell.borrow_mut();
+            if pdfium_opt.is_none() {
+                match Self::init_pdfium() {
+                    Ok(p) => *pdfium_opt = Some(p),
+                    Err(e) => return Err(e),
                 }
             }
-        }
-        
-        // Push remaining trailing snippet
-        if !current_snippet.is_empty() {
-            if let Some(bbox) = current_bbox {
-                contracts::log_debug!(
-                    "PASS_1",
-                    "Parser",
-                    format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
-                    format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
-                );
-                segments.push(LayoutHint {
-                    bounding_box: bbox,
-                    font_size: current_font_size,
-                    text_snippet: current_snippet,
-                });
-            }
-        }
-        
-        // 3. Layout Segmentation and Sorting
-        let mut sorted_segments = layout_engine::LayoutEngine::compute_reading_order(segments, mid_x);
-        
-        // Construct raw layout-corrected text stream
-        let mut raw_text = String::new();
-        for seg in &sorted_segments {
-            raw_text.push_str(&seg.text_snippet);
-            raw_text.push(' ');
-        }
-        
-        // 4. Overlap Context Buffer calculation: Prefix previous page context (Pass 1 specs)
-        let mut overlap_context = String::new();
-        if page_number > 1 {
-            if let Ok(prev_text) = lopdf_doc.extract_text(&[page_number - 1]) {
-                let sentences: Vec<&str> = prev_text.split('.').collect();
-                let last_sentences = sentences.iter().rev().take(4).rev();
-                for s in last_sentences {
-                    overlap_context.push_str(s.trim());
-                    overlap_context.push_str(". ");
-                }
-            }
-        }
-        
-        // 5. Image Extraction and Image-Caption boundary checking
-        let pdf_path = Path::new(&self.pdf_path);
-        let parent_dir = pdf_path.parent().unwrap_or_else(|| Path::new("."));
-        let output_dir = parent_dir.to_path_buf();
-        
-        let extracted_images = image_extractor::ImageExtractor::extract_images_from_page(
-            &page, &doc, &lopdf_doc, page_number, page_width, page_height, &output_dir
-        )?;
-        
-        for img in &extracted_images {
-            raw_text.push_str(&format!(" [Image: {}] ", img.local_uri));
+            let pdfium = pdfium_opt.as_ref().ok_or_else(|| AppError::LayoutParsingError("PDFium instance not available".to_string()))?;
+
+            let doc = pdfium.load_pdf_from_file(&self.pdf_path, None).map_err(|e| AppError::LayoutParsingError(e.to_string()))?;
+            println!("get page..."); let page = doc.pages().get((page_number - 1) as u16).map_err(|e| AppError::LayoutParsingError(e.to_string()))?;
             
-            let img_y_min = img.bounding_box[1];
-            let img_x_min = img.bounding_box[0];
-            let img_x_max = img.bounding_box[2];
+            // Retrieve physical page bounds (PostScript points: 1/72 inch)
+            let page_width = page.width().value;
+            let page_height = page.height().value;
+            let mid_x = page_width / 2.0;
             
-            for seg in &mut sorted_segments {
-                let seg_y_max = seg.bounding_box[3];
-                let seg_x_mid = (seg.bounding_box[0] + seg.bounding_box[2]) / 2.0;
-                
-                if seg_y_max < img_y_min 
-                   && img_y_min - seg_y_max < 30.0 
-                   && seg_x_mid > img_x_min - 20.0 
-                   && seg_x_mid < img_x_max + 20.0 
-                   && (seg.text_snippet.starts_with("Fig") || seg.text_snippet.starts_with("Figure")) {
-                    seg.text_snippet = format!("[Caption: {}]", seg.text_snippet);
+            println!("get page_text..."); let page_text = page.text().map_err(|e| AppError::LayoutParsingError(e.to_string()))?;
+            
+            // Accumulate character segments with high-fidelity coordinate systems
+            let mut segments: Vec<LayoutHint> = Vec::new();
+            
+            // Segment boundaries and double-column clustering preparation
+            let mut current_snippet = String::new();
+            let mut current_bbox: Option<BoundingBox> = None;
+            let mut current_font_size = 0.0;
+            
+            println!("char iteration..."); let mut char_count = 0; for c in page_text.chars().iter() {
+                char_count += 1; if char_count % 1000 == 0 { println!("Processed {} chars", char_count); } if let Ok(rects) = c.loose_bounds() {
+                    let rect = [
+                        rects.left().value,
+                        rects.bottom().value,
+                        rects.right().value,
+                        rects.top().value,
+                    ];
+                    
+                    let char_str = c.unicode_string().unwrap_or_default();
+                    let font_size = c.text_object().map(|obj| obj.unscaled_font_size().value).unwrap_or(10.0);
+                    
+                    contracts::log_debug!(
+                        "PASS_1",
+                        "Parser",
+                        format!("Geometric coordinate mapping -> Char: '{}'", char_str),
+                        format!("BBox: [{}, {}, {}, {}], FontSize: {}pt, Status: Success", rect[0], rect[1], rect[2], rect[3], font_size)
+                    );
+                    
+                    // Simple word/token segmentation based on whitespace characters
+                    if char_str.trim().is_empty() {
+                        if !current_snippet.is_empty() {
+                            if let Some(bbox) = current_bbox {
+                                contracts::log_debug!(
+                                    "PASS_1",
+                                    "Parser",
+                                    format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
+                                    format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
+                                );
+                                segments.push(LayoutHint {
+                                    bounding_box: bbox,
+                                    font_size: current_font_size,
+                                    text_snippet: current_snippet.clone(),
+                                });
+                            }
+                            current_snippet.clear();
+                            current_bbox = None;
+                        }
+                    } else {
+                        current_snippet.push_str(&char_str);
+                        current_font_size = font_size;
+                        match current_bbox {
+                            None => current_bbox = Some(rect),
+                            Some(ref mut bbox) => {
+                                bbox[0] = bbox[0].min(rect[0]);
+                                bbox[1] = bbox[1].min(rect[1]);
+                                bbox[2] = bbox[2].max(rect[2]);
+                                bbox[3] = bbox[3].max(rect[3]);
+                            }
+                        }
+                    }
                 }
             }
-        }
-        
-        // Enforce structural limits to prevent memory spikes and bridge serialization lag
-        let max_layout_hints = 1000;
-        let max_raw_text_len = 100000;
+            
+            // Push remaining trailing snippet
+            if !current_snippet.is_empty() {
+                if let Some(bbox) = current_bbox {
+                    contracts::log_debug!(
+                        "PASS_1",
+                        "Parser",
+                        format!("PostScript operand intercept: Tj boundary -> Grouped token: '{}'", current_snippet),
+                        format!("BBox: [{}, {}, {}, {}], Status: Success", bbox[0], bbox[1], bbox[2], bbox[3])
+                    );
+                    segments.push(LayoutHint {
+                        bounding_box: bbox,
+                        font_size: current_font_size,
+                        text_snippet: current_snippet,
+                    });
+                }
+            }
+            
+            // 3. Layout Segmentation and Sorting
+            println!("Layout segmentation..."); let mut sorted_segments = layout_engine::LayoutEngine::compute_reading_order(segments, mid_x);
+            
+            // Construct raw layout-corrected text stream
+            let mut raw_text = String::new();
+            for seg in &sorted_segments {
+                raw_text.push_str(&seg.text_snippet);
+                raw_text.push(' ');
+            }
+            
+            // 4. Overlap Context Buffer calculation: Prefix previous page context (Pass 1 specs)
+            let mut overlap_context = String::new();
+            if page_number > 1 {
+                if let Ok(prev_page) = doc.pages().get((page_number - 2) as u16) {
+                    if let Ok(prev_text) = prev_page.text() {
+                        let text = prev_text.all();
+                        let sentences: Vec<&str> = text.split('.').collect();
+                        let last_sentences = sentences.iter().rev().take(4).rev();
+                        for s in last_sentences {
+                            overlap_context.push_str(s.trim());
+                            overlap_context.push_str(". ");
+                        }
+                    }
+                }
+            }
+            
+            // 5. Image Extraction and Image-Caption boundary checking
+            let pdf_path = Path::new(&self.pdf_path);
+            let parent_dir = pdf_path.parent().unwrap_or_else(|| Path::new("."));
+            let output_dir = parent_dir.to_path_buf();
+            
+            let extracted_images = image_extractor::ImageExtractor::extract_images_from_page(
+                &page, &doc, page_number, page_width, page_height, &output_dir
+            )?;
+            
+            for img in &extracted_images {
+                raw_text.push_str(&format!(" [Image: {}] ", img.local_uri));
+                
+                let img_y_min = img.bounding_box[1];
+                let img_x_min = img.bounding_box[0];
+                let img_x_max = img.bounding_box[2];
+                
+                for seg in &mut sorted_segments {
+                    let seg_y_max = seg.bounding_box[3];
+                    let seg_x_mid = (seg.bounding_box[0] + seg.bounding_box[2]) / 2.0;
+                    
+                    if seg_y_max < img_y_min 
+                       && img_y_min - seg_y_max < 30.0 
+                       && seg_x_mid > img_x_min - 20.0 
+                       && seg_x_mid < img_x_max + 20.0 
+                       && (seg.text_snippet.starts_with("Fig") || seg.text_snippet.starts_with("Figure")) {
+                        seg.text_snippet = format!("[Caption: {}]", seg.text_snippet);
+                    }
+                }
+            }
+            
+            // Enforce structural limits to prevent memory spikes and bridge serialization lag
+            let max_layout_hints = 1000;
+            let max_raw_text_len = 100000;
 
-        let mut final_hints = sorted_segments;
-        if final_hints.len() > max_layout_hints {
-            final_hints.truncate(max_layout_hints);
-        }
+            let mut final_hints = sorted_segments;
+            if final_hints.len() > max_layout_hints {
+                final_hints.truncate(max_layout_hints);
+            }
 
-        let mut final_raw_text = raw_text.trim().to_string();
-        if final_raw_text.len() > max_raw_text_len {
-            final_raw_text.truncate(max_raw_text_len);
-        }
+            let mut final_raw_text = raw_text.trim().to_string();
+            if final_raw_text.len() > max_raw_text_len {
+                final_raw_text.truncate(max_raw_text_len);
+            }
 
-        #[cfg(feature = "verbose-logging")]
-        let token_stream_words = final_raw_text.split_whitespace().count();
-        contracts::log_debug!(
-            "PASS_1",
-            "Parser",
-            "Completed layout-corrected text stream construction",
-            format!("Bytes: {}, Words: {}, Status: Success", final_raw_text.len(), token_stream_words)
-        );
+            #[cfg(feature = "verbose-logging")]
+            let token_stream_words = final_raw_text.split_whitespace().count();
+            contracts::log_debug!(
+                "PASS_1",
+                "Parser",
+                "Completed layout-corrected text stream construction",
+                format!("Bytes: {}, Words: {}, Status: Success", final_raw_text.len(), token_stream_words)
+            );
 
-        Ok(PageExtraction {
-            document_id: self.document_id.clone(),
-            page_number,
-            overlap_context: overlap_context.trim().to_string(),
-            raw_text: final_raw_text,
-            layout_hints: final_hints,
-            extracted_images,
+            Ok(PageExtraction {
+                document_id: self.document_id.clone(),
+                page_number,
+                overlap_context: overlap_context.trim().to_string(),
+                raw_text: final_raw_text,
+                layout_hints: final_hints,
+                extracted_images,
+            })
         })
     }
 
-    fn extract_images(&self, output_dir: &str) -> Result<Vec<String>> {
-        let pdfium = Self::init_pdfium()?;
-        let doc = pdfium.load_pdf_from_file(&self.pdf_path, None)?;
-        let lopdf_doc = lopdf::Document::load(&self.pdf_path)?;
-        let mut saved_image_keys = Vec::new();
-        
-        fs::create_dir_all(output_dir)?;
-        
-        let mut image_counter = 0;
-        let mut page_counter = 0;
-        for page in doc.pages().iter() {
-            page_counter += 1;
-            for object in page.objects().iter() {
-                if let Some(image_obj) = object.as_image_object() {
-                    image_counter += 1;
-                    let image_id = format!("img-p{}-{}", page_counter, image_counter);
-                    
-                    let mut hash = String::new();
-                    let mut saved_successfully = false;
-                    
-                    if let Ok(dynamic_image) = image_obj.get_processed_image(&doc) {
-                        let temp_filename = format!("temp_{}.png", image_id);
-                        let temp_path = Path::new(output_dir).join(&temp_filename);
-                        if dynamic_image.save(&temp_path).is_ok() {
-                            if let Ok(bytes) = fs::read(&temp_path) {
-                                let mut hasher = Sha256::new();
-                                hasher.update(&bytes);
-                                hash = format!("{:x}", hasher.finalize());
-                                
-                                let final_filename = format!("{}_{}.png", hash, image_id);
-                                let final_path = Path::new(output_dir).join(&final_filename);
-                                if fs::rename(&temp_path, &final_path).is_ok() {
-                                    saved_successfully = true;
-                                }
-                            }
-                            let _ = fs::remove_file(&temp_path);
-                        }
-                    }
-                    
-                    if !saved_successfully {
-                        for (_obj_id, obj) in lopdf_doc.objects.iter() {
-                            if let Ok(stream) = obj.as_stream() {
-                                if let Ok(subtype) = stream.dict.get(b"Subtype") {
-                                    if subtype.as_name().ok() == Some(b"Image" as &[u8]) {
-                                        if let Ok(raw_data) = stream.decompressed_content() {
-                                            let mut hasher = Sha256::new();
-                                            hasher.update(&raw_data);
-                                            hash = format!("{:x}", hasher.finalize());
-                                            
-                                            let final_filename = format!("{}_{}.png", hash, image_id);
-                                            let final_path = Path::new(output_dir).join(&final_filename);
-                                            
-                                            if let Ok(mut file) = File::create(&final_path) {
-                                                if file.write_all(&raw_data).is_ok() {
-                                                    saved_successfully = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    if !saved_successfully {
-                        let mut hasher = Sha256::new();
-                        hasher.update(image_id.as_bytes());
-                        hash = format!("{:x}", hasher.finalize());
-                        
-                        let final_filename = format!("{}_{}.png", hash, image_id);
-                        let final_path = Path::new(output_dir).join(&final_filename);
-                        let mut file = File::create(final_path)?;
-                        file.write_all(b"PNG_BINARY_DATA_FALLBACK")?;
-                    }
-                    
-                    saved_image_keys.push(format!("local-asset://{}_{}.png", hash, image_id));
+        fn extract_images(&self, output_dir: &str) -> Result<Vec<String>, AppError> {
+        PDFIUM_INSTANCE.with(|pdfium_cell| {
+            let mut pdfium_opt = pdfium_cell.borrow_mut();
+            if pdfium_opt.is_none() {
+                match Self::init_pdfium() {
+                    Ok(p) => *pdfium_opt = Some(p),
+                    Err(e) => return Err(e),
                 }
             }
-        }
-        
-        Ok(saved_image_keys)
+            let pdfium = pdfium_opt.as_ref().ok_or_else(|| AppError::LayoutParsingError("PDFium instance not available".to_string()))?;
+            let doc = pdfium.load_pdf_from_file(&self.pdf_path, None).map_err(|e| AppError::LayoutParsingError(e.to_string()))?;
+            let mut saved_image_keys = Vec::new();
+            let _ = std::fs::create_dir_all(output_dir);
+            let mut image_counter = 0;
+            let mut page_counter = 0;
+            for page in doc.pages().iter() {
+                page_counter += 1;
+                for object in page.objects().iter() {
+                    if let Some(image_obj) = object.as_image_object() {
+                        image_counter += 1;
+                        let image_id = format!("img-p{}-{}", page_counter, image_counter);
+                        let mut hash = String::new();
+                        let mut saved_successfully = false;
+                        if let Ok(dynamic_image) = image_obj.get_processed_image(&doc) {
+                            let temp_filename = format!("temp_{}.png", image_id);
+                            let temp_path = std::path::Path::new(output_dir).join(&temp_filename);
+                            if dynamic_image.save(&temp_path).is_ok() {
+                                if let Ok(bytes) = std::fs::read(&temp_path) {
+                                    let mut hasher = sha2::Sha256::new();
+                                    sha2::Digest::update(&mut hasher, &bytes);
+                                    hash = format!("{:x}", sha2::Digest::finalize(hasher));
+                                    let final_filename = format!("{}_{}.png", hash, image_id);
+                                    let final_path = std::path::Path::new(output_dir).join(&final_filename);
+                                    if std::fs::rename(&temp_path, &final_path).is_ok() {
+                                        saved_successfully = true;
+                                    }
+                                }
+                                let _ = std::fs::remove_file(&temp_path);
+                            }
+                        }
+                        if !saved_successfully {
+                            let mut hasher = sha2::Sha256::new();
+                            sha2::Digest::update(&mut hasher, image_id.as_bytes());
+                            hash = format!("{:x}", sha2::Digest::finalize(hasher));
+                            let final_filename = format!("{}_{}.png", hash, image_id);
+                            let final_path = std::path::Path::new(output_dir).join(&final_filename);
+                            if let Ok(mut file) = std::fs::File::create(&final_path) {
+                                let _ = std::io::Write::write_all(&mut file, b"PNG_BINARY_DATA_FALLBACK");
+                            }
+                        }
+                        saved_image_keys.push(format!("local-asset://{}_{}.png", hash, image_id));
+                    }
+                }
+            }
+            Ok(saved_image_keys)
+        })
     }
 }
 
 
 
-pub fn parse_markdown(local_path: &str) -> Result<String> {
+
+
+
+
+pub fn parse_markdown(local_path: &str) -> Result<String, AppError> {
     let content = if std::path::Path::new(local_path).exists() {
         std::fs::read_to_string(local_path)?
     } else {
@@ -709,7 +699,7 @@ fn parse_html_table(table_content: &str) -> ASTNode {
     ASTNode::Table { rows }
 }
 
-pub fn parse_html(local_path: &str) -> Result<String> {
+pub fn parse_html(local_path: &str) -> Result<String, AppError> {
     let content = if std::path::Path::new(local_path).exists() {
         std::fs::read_to_string(local_path)?
     } else {
@@ -948,7 +938,7 @@ pub fn parse_html(local_path: &str) -> Result<String> {
     Ok(serde_json::to_string(&extraction)?)
 }
 
-pub fn parse_epub(local_path: &str) -> Result<String> {
+pub fn parse_epub(local_path: &str) -> Result<String, AppError> {
     let doc_id = format!("doc-uuid-{}", sha2_hash(local_path));
     let mut sections = Vec::new();
     let mut blocks = Vec::new();
@@ -1023,7 +1013,7 @@ pub fn parse_epub(local_path: &str) -> Result<String> {
 }
 
 /// Helper function to parse a PDF file and return the raw JSON representation
-pub fn parse_pdf(local_path: &str) -> Result<String> {
+pub fn parse_pdf(local_path: &str) -> Result<String, AppError> {
     let path = std::path::Path::new(local_path);
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
     
@@ -1094,12 +1084,12 @@ pub extern "C" fn free_rust_string(s: *mut std::os::raw::c_char) {
     }
 }
 
-pub fn parse_document(local_path: &str, format: &str) -> Result<String> {
+pub fn parse_document(local_path: &str, format: &str) -> Result<String, AppError> {
     match format.to_lowercase().as_str() {
         "pdf" => parse_pdf(local_path),
         "markdown" | "md" => parse_markdown(local_path),
         "html" | "htm" => parse_html(local_path),
         "epub" => parse_epub(local_path),
-        _ => Err(anyhow::anyhow!("Unsupported format: {}", format)),
+        _ => Err(AppError::Generic(format!("Unsupported format: {}", format))),
     }
 }

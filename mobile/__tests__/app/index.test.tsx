@@ -3,7 +3,7 @@ import { create, act } from 'react-test-renderer';
 import { Alert } from 'react-native';
 import LibraryScreen from '../../app/index';
 import { router } from 'expo-router';
-import { db } from '../../src/database/schema';
+import { DbsBridge } from '../../src/native/DbsBridge';
 import { RustParserBridge } from '../../src/native/RustParserBridge';
 
 // Mock react-native FlatList to actually render children in the test renderer
@@ -41,12 +41,10 @@ jest.mock('../../src/hooks/useDatabaseSync', () => ({
 }));
 
 // Mock SQLite schema
-const mockExecAsync = jest.fn();
-const mockExecSync = jest.fn();
-jest.mock('../../src/database/schema', () => ({
-  db: {
-    execAsync: (...args: any[]) => mockExecAsync(...args),
-    execSync: (...args: any[]) => mockExecSync(...args),
+const mockClearDatabaseAsync = jest.fn();
+jest.mock('../../src/native/DbsBridge', () => ({
+  DbsBridge: {
+    clearDatabaseAsync: (...args: any[]) => mockClearDatabaseAsync(...args),
   },
 }));
 
@@ -132,7 +130,6 @@ describe('LibraryScreen Component Tests', () => {
 
     // Mock JSI PDF Static parser returning parsed page data
     mockParsePDFAsync.mockResolvedValueOnce(mockPageText);
-    mockExecAsync.mockResolvedValueOnce(undefined); // Mock transaction execution success
 
     // Capture Alert options to simulate pressing 'Cloud Processing'
     let alertOptions: any[] = [];
@@ -155,7 +152,6 @@ describe('LibraryScreen Component Tests', () => {
     });
 
     expect(mockParsePDFAsync).toHaveBeenCalledWith('docs/sample.pdf');
-    expect(mockExecAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO documents'));
     expect(mockRefreshLibrary).toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenLastCalledWith('Success', 'Document ingested successfully.');
   });
@@ -184,7 +180,6 @@ describe('LibraryScreen Component Tests', () => {
 
     mockParsePDFAsync.mockResolvedValueOnce(mockPageText);
     mockRunInferenceAsync.mockResolvedValueOnce(mockInferenceOutput);
-    mockExecAsync.mockResolvedValueOnce(undefined);
 
     let alertOptions: any[] = [];
     (Alert.alert as jest.Mock).mockImplementation((title, message, options) => {
@@ -204,7 +199,6 @@ describe('LibraryScreen Component Tests', () => {
 
     expect(mockParsePDFAsync).toHaveBeenCalledWith('docs/sample.pdf');
     expect(mockRunInferenceAsync).toHaveBeenCalledWith('models/llama3.gguf', mockPageText);
-    expect(mockExecAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO documents'));
     expect(mockRefreshLibrary).toHaveBeenCalled();
   });
 
@@ -231,7 +225,7 @@ describe('LibraryScreen Component Tests', () => {
       await cloudBtn.onPress();
     });
 
-    expect(mockExecSync).toHaveBeenCalledWith('ROLLBACK;');
+    expect(mockClearDatabaseAsync).toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenLastCalledWith('Ingestion Failed', errorMsg);
   });
 });

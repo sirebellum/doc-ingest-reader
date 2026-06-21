@@ -1,24 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { db } from '../database/schema';
-
-export interface Corpus {
-  id: string;
-  name: string;
-}
-
-export interface Document {
-  id: string;
-  title: string;
-  sha256_hash: string;
-  author?: string;
-  source_type?: string;
-}
-
-export interface Section {
-  id: string;
-  title: string;
-  sort_order: number;
-}
+import { DbsBridge } from '../native/DbsBridge';
+import type { Corpus } from "../../../rust_core/contracts/bindings/Corpus"; export type { Corpus } from "../../../rust_core/contracts/bindings/Corpus";
+import type { Document } from "../../../rust_core/contracts/bindings/Document"; export type { Document } from "../../../rust_core/contracts/bindings/Document";
+import type { Section } from "../../../rust_core/contracts/bindings/Section"; export type { Section } from "../../../rust_core/contracts/bindings/Section";
 
 interface DatabaseContextProps {
   corpora: Corpus[];
@@ -40,9 +24,9 @@ export const DatabaseProvider = ({ children }: { children: ReactNode }): React.J
   const refreshLibrary = async () => {
     try {
       setError(null);
-      const allCorpora = await db.getAllAsync('SELECT * FROM corpora ORDER BY created_at DESC') as Corpus[];
+      const allCorpora = await DbsBridge.getCorporaAsync();
       setCorpora(allCorpora);
-      const allDocs = await db.getAllAsync('SELECT * FROM documents ORDER BY created_at DESC') as Document[];
+      const allDocs = await DbsBridge.getDocumentsAsync();
       setDocuments(allDocs);
     } catch (e: any) {
       console.error('Failed to fetch library from db', e);
@@ -55,10 +39,7 @@ export const DatabaseProvider = ({ children }: { children: ReactNode }): React.J
   const loadSectionsForDocument = async (docId: string) => {
     try {
       setError(null);
-      const docsSections = await db.getAllAsync(
-        'SELECT * FROM sections WHERE document_id = ? ORDER BY sort_order ASC', 
-        [docId]
-      ) as Section[];
+      const docsSections = await DbsBridge.getSectionsForDocumentAsync(docId);
       setSections(docsSections);
     } catch (e: any) {
       console.error('Failed to fetch sections for document', e);

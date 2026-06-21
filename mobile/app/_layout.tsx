@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { setupDatabase } from '../src/database/schema';
+import { setupDatabase } from '../src/native/DbsBridge';
 import { DatabaseProvider } from '../src/hooks/useDatabaseSync';
 
 export default function Layout() {

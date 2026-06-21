@@ -1,5 +1,5 @@
-import { getDatabaseAdapter } from './backup';
 import { getPlainTextFromAST } from '../utils/ast';
+import { DbsBridge } from '../native/DbsBridge';
 
 export interface Block {
   id: string;
@@ -106,63 +106,33 @@ export function estimateDynamicBlockHeight(
 /**
  * Retrieves the cached layout height for a block from SQLite, calculating and writing it if not present.
  */
-export function getOrCacheDynamicBlockHeight(
+export async function getOrCacheDynamicBlockHeight(
   dbInstance: any,
   block: Block,
   viewport: ViewportDimensions,
   typography: TypographyConfig
-): number {
-  const db = getDatabaseAdapter(dbInstance);
-
-  try {
-    const cached = db.get<{ estimated_height: number }>(
-      'SELECT estimated_height FROM layout_height_cache WHERE block_id = ?;',
-      [block.id]
-    );
-
-    if (cached && typeof cached.estimated_height === 'number') {
-      return cached.estimated_height;
-    }
-  } catch (err) {
-    // Graceful fallback to calculation
-  }
-
-  const height = estimateDynamicBlockHeight(block, viewport, typography);
-
-  try {
-    db.run(
-      'INSERT OR REPLACE INTO layout_height_cache (block_id, estimated_height) VALUES (?, ?);',
-      [block.id, height]
-    );
-  } catch (err) {
-    // Graceful write fallback
-  }
-
-  return height;
+): Promise<number> {
+  const estimated = estimateDynamicBlockHeight(block, viewport, typography);
+  return await DbsBridge.getOrCacheLayoutHeightAsync(block.id, estimated);
 }
 
 /**
  * Evicts all cached entries from the layout_height_cache table.
  */
-export function evictLayoutHeightCache(dbInstance: any): void {
-  const db = getDatabaseAdapter(dbInstance);
-  try {
-    db.run('DELETE FROM layout_height_cache;');
-  } catch (err) {
-    // Graceful write fallback
-  }
+export async function evictLayoutHeightCache(dbInstance: any): Promise<void> {
+  await DbsBridge.evictLayoutHeightCacheAsync();
 }
 
 /**
  * Dynamic Reflow Page Splitting & Pagination Mapper.
  * Partitions chapters into precise page indexes under different screen sizes and scales.
  */
-export function paginateBlocks(
+export async function paginateBlocks(
   blocks: Block[],
   viewport: ViewportDimensions,
   typography: TypographyConfig,
   dbInstance?: any
-): ChapterPage[] {
+): Promise<ChapterPage[]> {
   const pages: ChapterPage[] = [];
   let currentPageIndex = 0;
   let currentPageSegments: PageSegment[] = [];
@@ -176,7 +146,7 @@ export function paginateBlocks(
     const plainTextLength = plainText.length;
 
     const blockHeight = dbInstance
-      ? getOrCacheDynamicBlockHeight(dbInstance, block, viewport, typography)
+      ? await getOrCacheDynamicBlockHeight(dbInstance, block, viewport, typography)
       : estimateDynamicBlockHeight(block, viewport, typography);
 
     if (plainTextLength === 0 && block.block_type !== 'image' && block.block_type !== 'table') {

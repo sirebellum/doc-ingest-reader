@@ -13,9 +13,9 @@ export interface ConnectorConfig {
   modelName?: string;
 }
 
-import type { ExtractedBlock as TExtractedBlock } from '../shared/types/ExtractedBlock';
-import type { LLMStructuringOutput } from '../shared/types/LLMStructuringOutput';
-import type { ASTNode } from '../shared/types/ASTNode';
+import type { ExtractedBlock as TExtractedBlock } from '../../../rust_core/contracts/bindings/ExtractedBlock';
+import type { LLMStructuringOutput } from '../../../rust_core/contracts/bindings/LLMStructuringOutput';
+import type { ASTNode } from '../../../rust_core/contracts/bindings/ASTNode';
 
 export type ExtractedBlock = TExtractedBlock;
 export type StructuringResponse = LLMStructuringOutput;

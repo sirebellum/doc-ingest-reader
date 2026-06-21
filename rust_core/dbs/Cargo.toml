@@ -1,0 +1,10 @@
+[package]
+name = "dbs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+contracts = { path = "../contracts" }
+cxx = "1.0.194"
+rusqlite = { version = "0.31.0", features = ["bundled", "vtab"] }
+serde_json = "1.0.150"

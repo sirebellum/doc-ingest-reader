@@ -3,4 +3,4 @@ import type { ExtractedImageMetadata } from "./ExtractedImageMetadata";
 import type { StructuredBlock } from "./StructuredBlock";
 import type { StructuredSection } from "./StructuredSection";
 
-export type MultiFormatExtraction = { document_id: string, source_type: string, title: string, author: string | null, sections: Array<StructuredSection>, blocks: Array<StructuredBlock>, extracted_images: Array<ExtractedImageMetadata>, };
+export type MultiFormatExtraction = { document_id: string, source_type: string, title: string, author?: string, sections: Array<StructuredSection>, blocks: Array<StructuredBlock>, extracted_images: Array<ExtractedImageMetadata>, };

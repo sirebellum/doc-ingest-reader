@@ -11,7 +11,6 @@ lopdf = "0.31.0"
 pdfium-render = "0.8.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
 sha2 = "0.10"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 contracts = { path = "../contracts" }
@@ -23,6 +22,7 @@ rusqlite = { version = "0.31.0", features = ["bundled"] }
 uuid = { version = "1.8", features = ["v4"] }
 inference = { path = "../inference" }
 printpdf = "0.7.0"
+dbs = { path = "../dbs" }
 
 
 

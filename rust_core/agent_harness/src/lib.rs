@@ -3,9 +3,7 @@ use std::ffi::c_void;
 
 
 pub mod tools;
-pub mod migration;
 pub mod agent;
-pub mod db;
 pub mod prompt;
 pub mod ingest;
 
@@ -28,7 +26,7 @@ pub extern "C" fn agent_init_ffi(agent_path: *const c_char, content_path: *const
 
     let agent_conn = match rusqlite::Connection::open(&agent_path_str) {
         Ok(c) => {
-            if let Err(e) = db::init_agent_db(&c) {
+            if let Err(e) = dbs::manager::init_agent_db(&c) {
                 eprintln!("Failed to initialize agent DB schema: {}", e);
                 return std::ptr::null_mut();
             }

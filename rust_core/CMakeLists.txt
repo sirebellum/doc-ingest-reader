@@ -140,7 +140,7 @@ add_custom_target(desktop-server
 
 # Target: Start Desktop Server (runs it)
 add_custom_target(start-desktop-server
-    COMMAND ${CARGO_EXE} run -p desktop_server ${CARGO_FEATURE_FLAGS} -- --db "${CMAKE_CURRENT_SOURCE_DIR}/parser/target/test_artifacts/test_corpus.db"
+    COMMAND ${CARGO_EXE} run -p desktop_server ${CARGO_FEATURE_FLAGS} -- --db "${CMAKE_CURRENT_SOURCE_DIR}/../test_artifacts/e2e_integration_test/test_corpus.db"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Starting Host Desktop Server..."
     USES_TERMINAL

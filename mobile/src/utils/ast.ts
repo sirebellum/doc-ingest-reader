@@ -1,4 +1,4 @@
-import { ASTNode } from '../shared/types/ASTNode';
+import { ASTNode } from '../../../rust_core/contracts/bindings/ASTNode';
 
 /**
  * Recursively extracts plain text from a Semantic AST Node.

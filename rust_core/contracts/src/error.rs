@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
 
+    #[error("Null byte found in C string: {0}")]
+    NulError(#[from] std::ffi::NulError),
+
     #[error("Database error: {0}")]
     DatabaseError(String),
 

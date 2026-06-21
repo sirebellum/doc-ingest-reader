@@ -2,12 +2,14 @@ import React from 'react';
 import { create, act } from 'react-test-renderer';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useDatabaseSync, DatabaseProvider } from '../useDatabaseSync';
-import { db } from '../../database/schema';
+import { DbsBridge } from '../../native/DbsBridge';
 
 // Mock the database schema module
-jest.mock('../../database/schema', () => ({
-  db: {
-    getAllAsync: jest.fn(),
+jest.mock('../../native/DbsBridge', () => ({
+  DbsBridge: {
+    getCorporaAsync: jest.fn(),
+    getDocumentsAsync: jest.fn(),
+    getSectionsForDocumentAsync: jest.fn(),
   },
 }));
 
@@ -63,9 +65,8 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
       { id: 'd2', title: 'Chemistry Book', sha256_hash: 'sha2' },
     ];
 
-    (db.getAllAsync as jest.Mock)
-      .mockResolvedValueOnce(mockCorpora) // First call: corpora
-      .mockResolvedValueOnce(mockDocs);   // Second call: documents
+    (DbsBridge.getCorporaAsync as jest.Mock).mockResolvedValueOnce(mockCorpora);
+    (DbsBridge.getDocumentsAsync as jest.Mock).mockResolvedValueOnce(mockDocs);
 
     let renderTree: any;
     await act(async () => {
@@ -82,8 +83,8 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
       await Promise.resolve();
     });
 
-    expect(db.getAllAsync).toHaveBeenNthCalledWith(1, 'SELECT * FROM corpora ORDER BY created_at DESC');
-    expect(db.getAllAsync).toHaveBeenNthCalledWith(2, 'SELECT * FROM documents ORDER BY created_at DESC');
+    expect(DbsBridge.getCorporaAsync).toHaveBeenCalled();
+    expect(DbsBridge.getDocumentsAsync).toHaveBeenCalled();
 
     const corporaText = renderTree.root.findByProps({ testID: 'corporaCount' });
     const documentsText = renderTree.root.findByProps({ testID: 'documentsCount' });
@@ -96,10 +97,12 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
     const mockCorpora = [{ id: 'c1', name: 'Science' }];
     const mockDocs = [{ id: 'd1', title: 'Book 1', sha256_hash: 'sha1' }];
 
-    (db.getAllAsync as jest.Mock)
+    (DbsBridge.getCorporaAsync as jest.Mock)
       .mockResolvedValueOnce([]) // Initial mount corpora
+      .mockResolvedValueOnce(mockCorpora); // Manual refresh corpora
+
+    (DbsBridge.getDocumentsAsync as jest.Mock)
       .mockResolvedValueOnce([]) // Initial mount documents
-      .mockResolvedValueOnce(mockCorpora) // Manual refresh corpora
       .mockResolvedValueOnce(mockDocs);   // Manual refresh documents
 
     let renderTree: any;
@@ -135,10 +138,9 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
       { id: 'sec-2', title: 'Chapter 2', sort_order: 2 },
     ];
 
-    (db.getAllAsync as jest.Mock)
-      .mockResolvedValueOnce([]) // Initial mount corpora
-      .mockResolvedValueOnce([]) // Initial mount documents
-      .mockResolvedValueOnce(mockSections); // Section fetch
+    (DbsBridge.getCorporaAsync as jest.Mock).mockResolvedValueOnce([]);
+    (DbsBridge.getDocumentsAsync as jest.Mock).mockResolvedValueOnce([]);
+    (DbsBridge.getSectionsForDocumentAsync as jest.Mock).mockResolvedValueOnce(mockSections);
 
     let renderTree: any;
     await act(async () => {
@@ -159,10 +161,7 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
       await Promise.resolve();
     });
 
-    expect(db.getAllAsync).toHaveBeenLastCalledWith(
-      'SELECT * FROM sections WHERE document_id = ? ORDER BY sort_order ASC',
-      ['doc-1']
-    );
+    expect(DbsBridge.getSectionsForDocumentAsync).toHaveBeenLastCalledWith('doc-1');
 
     const sectionsText = renderTree.root.findByProps({ testID: 'sectionsCount' });
     expect(sectionsText.props.children).toBe(2);
@@ -171,7 +170,8 @@ describe('useDatabaseSync Custom SQLite Hook', () => {
   it('should log an error inside console.error if database queries throw exceptions', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const errorMsg = 'Failed to load';
-    (db.getAllAsync as jest.Mock).mockRejectedValue(new Error(errorMsg));
+    (DbsBridge.getCorporaAsync as jest.Mock).mockRejectedValue(new Error(errorMsg));
+    (DbsBridge.getSectionsForDocumentAsync as jest.Mock).mockRejectedValue(new Error(errorMsg));
 
     let renderTree: any;
     await act(async () => {

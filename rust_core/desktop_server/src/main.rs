@@ -2,6 +2,17 @@ use tiny_http::{Server, Request, Response, Header};
 use serde_json::Value;
 use parser::{RealPdfExtractor, MockPdfExtractor, PdfExtractor};
 use std::sync::OnceLock;
+use contracts::error::AppError;
+
+fn format_error(e: AppError) -> String {
+    serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+        .unwrap_or_else(|_| "{\"error\": \"Internal error serialization failed\"}".to_string())
+}
+
+fn format_string_error(e: &str) -> String {
+    serde_json::to_string(&serde_json::json!({ "error": e }))
+        .unwrap_or_else(|_| "{\"error\": \"Internal error serialization failed\"}".to_string())
+}
 
 static TEST_DB_PATH: OnceLock<String> = OnceLock::new();
 
@@ -16,9 +27,9 @@ fn main() {
     }
     
     let resolved_path = db_path.unwrap_or_else(|| {
-        let p1 = "test_artifacts/test_dbs/e2e_integration/test_corpus.db";
-        let p2 = "../test_artifacts/test_dbs/e2e_integration/test_corpus.db";
-        let p3 = "../../test_artifacts/test_dbs/e2e_integration/test_corpus.db";
+        let p1 = "test_artifacts/e2e_synthetic_validation/test_corpus.db";
+        let p2 = "../test_artifacts/e2e_synthetic_validation/test_corpus.db";
+        let p3 = "../../test_artifacts/e2e_synthetic_validation/test_corpus.db";
         let p4 = "parser/target/test_artifacts/test_corpus.db";
         if std::path::Path::new(p1).exists() {
             p1.to_string()
@@ -138,19 +149,19 @@ fn handle_request(mut request: Request) {
                 "md" | "markdown" => {
                     match parser::parse_markdown(&path) {
                         Ok(json) => json,
-                        Err(e) => format!("{{\"error\":\"Markdown parsing failed: {}\"}}", e),
+                        Err(e) => format_error(e),
                     }
                 }
                 "html" | "htm" => {
                     match parser::parse_html(&path) {
                         Ok(json) => json,
-                        Err(e) => format!("{{\"error\":\"HTML parsing failed: {}\"}}", e),
+                        Err(e) => format_error(e),
                     }
                 }
                 "epub" => {
                     match parser::parse_epub(&path) {
                         Ok(json) => json,
-                        Err(e) => format!("{{\"error\":\"EPUB parsing failed: {}\"}}", e),
+                        Err(e) => format_error(e),
                     }
                 }
                 "pdf" => {
@@ -168,7 +179,7 @@ fn handle_request(mut request: Request) {
                             let mock = MockPdfExtractor { document_id: doc_id };
                             match mock.extract_page(page_number) {
                                 Ok(extraction) => serde_json::to_string(&extraction).unwrap_or_default(),
-                                Err(me) => format!("{{\"error\":\"PDF Mock extraction failed: {}\"}}", me),
+                                Err(me) => format_error(me),
                             }
                         }
                     }
@@ -198,7 +209,7 @@ fn handle_request(mut request: Request) {
 
             let result_str = match inference::run_local_inference(&prompt) {
                 Ok(res) => res,
-                Err(e) => format!("{{\"error\":\"Local inference execution failed: {}\"}}", e),
+                Err(e) => format_error(e),
             };
 
             let mut res = Response::from_string(result_str)
@@ -210,7 +221,7 @@ fn handle_request(mut request: Request) {
         }
 
         ("POST", "/delineate") => {
-            let mut res = Response::from_string("{\"error\":\"Endpoint removed\"}").with_status_code(404);
+            let mut res = Response::from_string(format_string_error("Endpoint removed")).with_status_code(404);
             let content_type = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
             res = res.with_header(content_type);
             res
@@ -276,7 +287,7 @@ fn handle_request(mut request: Request) {
         }
 
         _ => {
-            Response::from_string("{\"error\":\"Endpoint not found\"}")
+            Response::from_string(format_string_error("Endpoint not found"))
                 .with_status_code(404)
         }
     };

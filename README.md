@@ -42,11 +42,11 @@ To parse and ingest raw documents (e.g. `Research Notes.pdf`) into a structured 
 cmake --build build --target CargoTests
 ```
 
-This test generates a pre-populated SQLite database at `test_artifacts/test_dbs/e2e_integration/test_corpus.db` containing the parsed semantic AST blocks and sections of the PDF.
+This test generates a pre-populated SQLite database at `test_artifacts/e2e_synthetic_validation/test_corpus.db` containing the parsed semantic AST blocks and sections of the PDF.
 
 ### 3. Run the Gateway Database Server
 
-The React Native Expo Web build runs inside the web browser sandbox and cannot access the local filesystem database directly. You can specify a custom database file to be served by the gateway by setting the `SERVED_DB_PATH` environment variable before starting the desktop server (e.g., `$env:SERVED_DB_PATH="test_artifacts/test_dbs/e2e_synthetic/synthetic_test.db"; cmake --build build --target start-desktop-server`). If not provided, it will serve an empty `llm_pdf_reader.db` production database where you can manually add PDFs. The gateway server starts at `http://localhost:8080`.
+The React Native Expo Web build runs inside the web browser sandbox and cannot access the local filesystem database directly. You can specify a custom database file to be served by the gateway by setting the `SERVED_DB_PATH` environment variable before starting the desktop server (e.g., `$env:SERVED_DB_PATH="test_artifacts/e2e_synthetic_validation/test_agent.db"; cmake --build build --target start-desktop-server`). If not provided, it will serve an empty `llm_pdf_reader.db` production database where you can manually add PDFs. The gateway server starts at `http://localhost:8080`.
 - **Database Endpoint**: `http://localhost:8080/db` serves the raw SQLite binary.
 - **REST Endpoints**: `/parse`, `/inference`, `/delineate`, `/similarity` are available for layout and model actions.
 
@@ -99,7 +99,29 @@ You can filter and run specific test suites using the `-R` flag:
 - **Run Jest tests only**:
   ```bash
   cd build
-  ctest -C Debug-R JestTests --output-on-failure
+  ctest -C Debug -R JestTests --output-on-failure
   ```
 
+### Run Gated/Heavy LLM Tests
 
+The E2E tests that involve local LLM inference are marked with `#[ignore]` to prevent them from blocking the standard `ctest` runs (as they take a long time to parse PDFs token-by-token). To explicitly run these heavy validation pipelines, navigate to the `rust_core` directory and use Cargo's ignored flag:
+
+```bash
+cd rust_core
+cargo test -- --ignored
+```
+
+---
+
+## ⚙️ CMake Build Flags
+
+You can customize the compilation behavior by passing the following flags to the `cmake -B build` configuration command (e.g., `cmake -B build -DLLAMA_NATIVE=ON`):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-DALL_TESTS` | `OFF` | Enables all testing targets across the workspace. |
+| `-DRUN_INTEGRATION_TESTS` | `ON` | Enables integration tests and synthetic programmatic validation suites. |
+| `-DLLAMA_NATIVE` | `ON` | Configures and natively compiles `llama.cpp` from source for local device inference. |
+| `-DBUILD_ANDROID_APK` | `OFF` | Sets up the NDK toolchain and cross-compiles the Android APK target. |
+| `-DBUILD_IOS_FRAMEWORK` | `OFF` | Configures the Xcode toolchain and builds the iOS cross-compiled Framework target. |
+| `-DENABLE_CORE_DEBUG_LOGS` | `OFF` | Activates compile-time conditional debug logging across the native engines and React Native frontend. |

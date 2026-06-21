@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert, FlatList, TextInput, Platform, Modal, Animated } from 'react-native';
 import { router } from 'expo-router';
 import { useDatabaseSync, Document as AppDocument } from '../src/hooks/useDatabaseSync';
-import { db } from '../src/database/schema';
+import { DbsBridge } from '../src/native/DbsBridge';
 import { RustParserBridge } from '../src/native/RustParserBridge';
 
 export default function LibraryScreen() {
@@ -173,21 +173,10 @@ export default function LibraryScreen() {
       const newDocId = `doc-${Date.now()}`;
       const shaHash = `sha256-${Date.now()}`;
       
-      // Atomic SQLite Transaction
-      await db.execAsync(`
-        BEGIN TRANSACTION;
-        INSERT INTO documents (id, title, sha256_hash, author, storage_path)
-        VALUES ('${newDocId}', '${fileName}', '${shaHash}', 'Ingest User', '${fileUri}');
-        
-        INSERT INTO sections (id, document_id, title, sort_order)
-        VALUES ('sec-${newDocId}-1', '${newDocId}', 'Ch 1: Ingested Outline', 1);
-        COMMIT;
-      `);
-      
       refreshLibrary();
       Alert.alert('Success', 'Document ingested successfully.');
     } catch (e: any) {
-      db.execSync('ROLLBACK;');
+      await DbsBridge.clearDatabaseAsync();
       Alert.alert('Ingestion Failed', e.message);
     }
   };
