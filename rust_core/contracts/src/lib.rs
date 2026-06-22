@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 use ts_rs::TS;
 
 pub mod error;
+pub mod hash;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
@@ -194,13 +195,6 @@ pub enum ExtractedMetadata {
     Summary(String),
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_export() {
-        // Handled automatically by #[ts(export)]
-    }
-}
 
 #[macro_export]
 macro_rules! log_debug {
