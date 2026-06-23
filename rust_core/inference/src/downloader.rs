@@ -29,7 +29,10 @@ impl ModelDownloader {
     pub fn validate_sandbox_path(path: &Path) -> Result<(), AppError> {
         let path_str = path.to_string_lossy();
         if path_str.contains("..") {
-            return Err(AppError::Generic(format!("Sandbox violation: path traversal detected in {:?}", path)));
+            return Err(AppError::Generic(format!(
+                "Sandbox violation: path traversal detected in {:?}",
+                path
+            )));
         }
         Ok(())
     }
@@ -64,7 +67,10 @@ impl ModelDownloader {
                         }
                     }
                     Err(e) => {
-                        println!("[ModelDownloader] Error hashing existing file: {:?}. Re-downloading.", e);
+                        println!(
+                            "[ModelDownloader] Error hashing existing file: {:?}. Re-downloading.",
+                            e
+                        );
                     }
                 }
             } else {
@@ -95,27 +101,46 @@ impl ModelDownloader {
                     if let Ok(modified) = metadata.modified() {
                         if let Ok(elapsed) = modified.elapsed() {
                             if elapsed > Duration::from_secs(1800) {
-                                println!("[ModelDownloader] Stale lock file detected. Removing it.");
+                                println!(
+                                    "[ModelDownloader] Stale lock file detected. Removing it."
+                                );
                                 let _ = fs::remove_file(&lock_path);
                                 OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
                                     .open(&lock_path)
-                                    .map_err(|_| AppError::Generic(format!("Failed to acquire newly cleared lock file")))?
+                                    .map_err(|_| {
+                                        AppError::Generic(format!(
+                                            "Failed to acquire newly cleared lock file"
+                                        ))
+                                    })?
                             } else {
-                                return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
+                                return Err(AppError::Generic(format!(
+                                    "Another download operation is currently in progress."
+                                )));
                             }
                         } else {
-                            return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
+                            return Err(AppError::Generic(format!(
+                                "Another download operation is currently in progress."
+                            )));
                         }
                     } else {
-                        return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
+                        return Err(AppError::Generic(format!(
+                            "Another download operation is currently in progress."
+                        )));
                     }
                 } else {
-                    return Err(AppError::Generic(format!("Another download operation is currently in progress.")));
+                    return Err(AppError::Generic(format!(
+                        "Another download operation is currently in progress."
+                    )));
                 }
             }
-            Err(e) => return Err(AppError::Generic(format!("Failed to create lock file: {:?}", e))),
+            Err(e) => {
+                return Err(AppError::Generic(format!(
+                    "Failed to create lock file: {:?}",
+                    e
+                )))
+            }
         };
 
         // Ensure the lock is cleaned up on exit
@@ -156,14 +181,13 @@ impl ModelDownloader {
                     RANGE,
                     format!("bytes={}-", downloaded_bytes)
                         .parse()
-                        .map_err(|e| AppError::NetworkError(format!("Invalid range header: {}", e)))?,
+                        .map_err(|e| {
+                            AppError::NetworkError(format!("Invalid range header: {}", e))
+                        })?,
                 );
             }
 
-            let request_res = client
-                .get(url)
-                .headers(headers)
-                .send();
+            let request_res = client.get(url).headers(headers).send();
 
             match request_res {
                 Ok(mut response) => {
@@ -172,7 +196,10 @@ impl ModelDownloader {
                         println!("[ModelDownloader] Server returned error status: {}", status);
                         retries -= 1;
                         if retries == 0 {
-                            return Err(AppError::Generic(format!("Download failed: Server returned status {}", status)));
+                            return Err(AppError::Generic(format!(
+                                "Download failed: Server returned status {}",
+                                status
+                            )));
                         }
                         std::thread::sleep(backoff);
                         backoff *= 2;
@@ -181,10 +208,12 @@ impl ModelDownloader {
 
                     // Check if server accepted the range request (Partial Content 206)
                     let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
-                    
+
                     // Total expected bytes of the *full* file
                     let total_bytes = if is_partial {
-                        if let Some(content_range) = response.headers().get(reqwest::header::CONTENT_RANGE) {
+                        if let Some(content_range) =
+                            response.headers().get(reqwest::header::CONTENT_RANGE)
+                        {
                             if let Ok(range_str) = content_range.to_str() {
                                 if let Some(slash_idx) = range_str.rfind('/') {
                                     range_str[slash_idx + 1..].parse::<u64>().ok()
@@ -209,9 +238,16 @@ impl ModelDownloader {
 
                     // Open file in append or write mode
                     let mut file = if is_partial && downloaded_bytes > 0 {
-                        OpenOptions::new().write(true).append(true).open(&part_path)?
+                        OpenOptions::new()
+                            .write(true)
+                            .append(true)
+                            .open(&part_path)?
                     } else {
-                        OpenOptions::new().write(true).create(true).truncate(true).open(&part_path)?
+                        OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&part_path)?
                     };
 
                     let mut total_downloaded = if is_partial { downloaded_bytes } else { 0 };
@@ -224,7 +260,10 @@ impl ModelDownloader {
                             Ok(0) => break, // EOF reached
                             Ok(n) => {
                                 if let Err(e) = file.write_all(&buffer[..n]) {
-                                    download_error = Some(AppError::Generic(format!("Failed to write to part file: {:?}", e)));
+                                    download_error = Some(AppError::Generic(format!(
+                                        "Failed to write to part file: {:?}",
+                                        e
+                                    )));
                                     break;
                                 }
                                 total_downloaded += n as u64;
@@ -237,7 +276,8 @@ impl ModelDownloader {
                                 }
                             }
                             Err(e) => {
-                                download_error = Some(AppError::Generic(format!("Network read error: {:?}", e)));
+                                download_error =
+                                    Some(AppError::Generic(format!("Network read error: {:?}", e)));
                                 break;
                             }
                         }
@@ -278,8 +318,7 @@ impl ModelDownloader {
                 let _ = fs::remove_file(&part_path);
                 return Err(AppError::Generic(format!(
                     "SHA-256 hash mismatch! Expected: {}, Got: {}. Deleted temporary part file.",
-                    expected,
-                    actual_hash
+                    expected, actual_hash
                 )));
             }
         }

@@ -154,6 +154,9 @@ if (RUN_INTEGRATION_TESTS)
         COMMAND "${CARGO_EXE}" test --workspace ${CARGO_FEATURE_FLAGS}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
+    if (DOWNLOAD_TEST_MODEL)
+        set_tests_properties(CargoTests PROPERTIES ENVIRONMENT "RUN_LLM_E2E_TESTS=1;LLM_TEST_MODEL_URL=https://huggingface.co/bartowski/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf")
+    endif()
     # Specific integration validation tests mapping
     # Note: tests referencing delineator were refactored into agent_harness
 endif()

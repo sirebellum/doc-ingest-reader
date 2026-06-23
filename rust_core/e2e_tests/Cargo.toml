@@ -1,0 +1,20 @@
+[package]
+name = "e2e_tests"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+parser = { path = "../parser" }
+inference = { path = "../inference" }
+contracts = { path = "../contracts" }
+agent_harness = { path = "../agent_harness" }
+dbs = { path = "../dbs" }
+
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+uuid = { version = "1.8", features = ["v4"] }
+printpdf = "0.7.0"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+[features]
+llama_native = ["inference/llama_native"]

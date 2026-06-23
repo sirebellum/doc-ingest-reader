@@ -150,6 +150,10 @@ END;
 "#;
 
 fn setup_mock_inference() {
+    if let Ok(model_url) = std::env::var("LLM_TEST_MODEL_URL") {
+        let _ = inference::initialize_inference_context(&model_url);
+        return;
+    }
     let dummy_path = "dummy_model.gguf";
     if !Path::new(dummy_path).exists() {
         std::fs::File::create(dummy_path).unwrap();
@@ -158,6 +162,7 @@ fn setup_mock_inference() {
 }
 
 fn cleanup_mock_inference() {
+    inference::teardown_inference_context();
     let dummy_path = "dummy_model.gguf";
     if Path::new(dummy_path).exists() {
         let _ = std::fs::remove_file(dummy_path);
@@ -289,9 +294,9 @@ fn test_research_notes_ingestion() {
     assert!(!fts_rows.is_empty(), "FTS virtual table is empty. Triggers did not execute.");
     
     // Verify FTS trigger stripped AST formatting
-    for (block_id, fts_content) in &fts_rows {
-        assert!(!fts_content.contains("\"text\":"), "FTS content contains JSON key pollution ('\"text\":'): {}", fts_content);
-        println!("FTS Content for block {}: '{}'", block_id, fts_content);
+    for (_block_id, fts_content) in &fts_rows {
+        assert!(!fts_content.contains("\"text\":"), "FTS content contains JSON key pollution");
+        println!("FTS Content for block {}: '{}'", _block_id, fts_content);
     }
 
     cleanup_mock_inference();

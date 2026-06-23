@@ -32,8 +32,8 @@ impl AgentState {
         
         let id = uuid::Uuid::new_v4().to_string();
         let _ = dbs.agent_db.execute(
-            "INSERT INTO conversation_history (id, session_id, role, content) VALUES (?1, ?2, 'system', 'Agent Initialized')",
-            rusqlite::params![id, "session_1"]
+            "INSERT INTO conversation_history (id, session_id, role, content) VALUES (?1, ?2, 'system', ?3)",
+            rusqlite::params![id, "session_1", crate::prompt::AGENT_SYSTEM_PROMPT]
         );
         
         Self {

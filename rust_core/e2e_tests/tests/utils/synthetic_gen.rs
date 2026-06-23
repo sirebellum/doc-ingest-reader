@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use printpdf::*;
 use serde::{Serialize, Deserialize};
 use std::fs::File;

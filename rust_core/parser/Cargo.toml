@@ -20,11 +20,4 @@ verbose-logging = ["contracts/verbose-logging"]
 [dev-dependencies]
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 uuid = { version = "1.8", features = ["v4"] }
-inference = { path = "../inference" }
 printpdf = "0.7.0"
-dbs = { path = "../dbs" }
-
-
-
-
-agent_harness = { path = "../agent_harness" }

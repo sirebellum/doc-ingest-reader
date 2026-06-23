@@ -151,6 +151,10 @@ END;
 "#;
 
 fn setup_mock_inference() {
+    if let Ok(model_url) = std::env::var("LLM_TEST_MODEL_URL") {
+        let _ = inference::initialize_inference_context(&model_url);
+        return;
+    }
     let dummy_path = "dummy_model.gguf";
     if !Path::new(dummy_path).exists() {
         std::fs::File::create(dummy_path).unwrap();
@@ -159,17 +163,45 @@ fn setup_mock_inference() {
 }
 
 fn cleanup_mock_inference() {
+    inference::teardown_inference_context();
     let dummy_path = "dummy_model.gguf";
     if Path::new(dummy_path).exists() {
         let _ = std::fs::remove_file(dummy_path);
     }
 }
 
-#[test]
-#[ignore]
-fn test_e2e_synthetic_validation() {
-    setup_mock_inference();
+fn mock_agent_inference(prompt: &str) -> Result<String, contracts::error::AppError> {
+    if !prompt.contains("chunk_0") {
+        return Ok("{\"tool\": \"read_content_db\", \"args\": {\"chunk_id\": \"chunk_0\"}}".to_string());
+    }
+    if prompt.contains("created_node_id") {
+        return Ok("{\"tool\": \"ParsingComplete\", \"args\": {}}".to_string());
+    }
+    
+    println!("MOCK PROMPT: {}", prompt);
+    let mut extracted_text = String::new();
+    if let Some(idx) = prompt.find("\"text\":\"") {
+        let rest = &prompt[idx + 8..];
+        if let Some(end) = rest.find("\"}") {
+            extracted_text = rest[..end].to_string();
+            extracted_text = extracted_text.replace("\\n", "\n").replace("\\\"", "\"");
+        }
+    }
+    
+    println!("MOCK EXTRACTED TEXT: '{}'", extracted_text);
 
+    let args = serde_json::json!({
+        "type": "block",
+        "id": uuid::Uuid::new_v4().to_string(),
+        "block_type": "p",
+        "content": extracted_text
+    });
+    
+    Ok(format!("{{\"tool\": \"CreateNode\", \"args\": {}}}", args.to_string()))
+}
+
+#[test]
+fn test_e2e_synthetic_validation() {
     let artifacts_dir_raw = Path::new("../../test_artifacts/e2e_synthetic_validation"); 
     fs::create_dir_all(&artifacts_dir_raw).expect("Failed to create dir"); 
     let artifacts_dir_pathbuf = artifacts_dir_raw.canonicalize().unwrap(); 
@@ -192,79 +224,54 @@ fn test_e2e_synthetic_validation() {
         agent_conn.execute("INSERT INTO corpora (id, name, description) VALUES (?, ?, ?)", params!["corp_1", "Test", "Desc"]).unwrap();
     }
 
-    let inputs = vec![
-        SyntheticInput {
-            title: "Doc 1 Simple".to_string(),
-            table_of_contents: vec![],
-            strip_index_from_pdf: false,
-            sections: vec![
-                SyntheticSection {
-                    section_id: "sec-1".to_string(),
-                    heading: "Chapter 1: Intro".to_string(),
-                    blocks: vec![SyntheticBlock { id: "blk-1".to_string(), block_type: "p".to_string(), content: "Simple paragraph".to_string() }],
+    let mut inputs = Vec::new();
+    let chapter_counts = vec![1, 2];
+    let has_tables_opts = vec![false, true];
+    let strip_opts = vec![false, true];
+
+    let mut doc_index = 1;
+    for &chapters in &chapter_counts {
+        for &has_table in &has_tables_opts {
+            for &strip in &strip_opts {
+                let mut sections = Vec::new();
+                let mut toc = Vec::new();
+                for c in 1..=chapters {
+                    let mut blocks = vec![SyntheticBlock {
+                        id: format!("blk-{}-1", c),
+                        block_type: "p".to_string(),
+                        content: format!("This is chapter {} paragraph text for document {}.", c, doc_index),
+                    }];
+                    if has_table && c == 1 {
+                        blocks.push(SyntheticBlock {
+                            id: format!("blk-{}-table", c),
+                            block_type: "table".to_string(),
+                            content: "".to_string(), // Drawn by PDF generator
+                        });
+                    }
+                    toc.push(synthetic_gen::TocItem {
+                        title: format!("Chapter {}", c),
+                        anchor_block_id: blocks[0].id.clone(),
+                    });
+                    sections.push(SyntheticSection {
+                        section_id: format!("sec-{}", c),
+                        heading: format!("Chapter {}", c),
+                        blocks,
+                    });
                 }
-            ],
-        },
-        SyntheticInput {
-            title: "Doc 2 Complex".to_string(),
-            table_of_contents: vec![],
-            strip_index_from_pdf: false,
-            sections: vec![
-                SyntheticSection {
-                    section_id: "sec-1".to_string(),
-                    heading: "Chapter 1: Complex".to_string(),
-                    blocks: vec![
-                        SyntheticBlock { id: "blk-1".to_string(), block_type: "p".to_string(), content: "First part".to_string() },
-                        SyntheticBlock { id: "blk-2".to_string(), block_type: "p".to_string(), content: "Second part".to_string() },
-                    ],
-                },
-                SyntheticSection {
-                    section_id: "sec-2".to_string(),
-                    heading: "Chapter 2: More".to_string(),
-                    blocks: vec![SyntheticBlock { id: "blk-3".to_string(), block_type: "p".to_string(), content: "More text".to_string() }],
-                }
-            ],
-        },
-        SyntheticInput {
-            title: "Doc 3 Table".to_string(),
-            table_of_contents: vec![],
-            strip_index_from_pdf: false,
-            sections: vec![
-                SyntheticSection {
-                    section_id: "sec-1".to_string(),
-                    heading: "Chapter 1: Tables".to_string(),
-                    blocks: vec![SyntheticBlock { id: "blk-1".to_string(), block_type: "table".to_string(), content: "".to_string() }],
-                }
-            ],
-        },
-        SyntheticInput {
-            title: "Doc 4 TOC".to_string(),
-            table_of_contents: vec![synthetic_gen::TocItem { title: "Ch1".to_string(), anchor_block_id: "blk-1".to_string() }],
-            strip_index_from_pdf: false,
-            sections: vec![
-                SyntheticSection {
-                    section_id: "sec-1".to_string(),
-                    heading: "Chapter 1: With TOC".to_string(),
-                    blocks: vec![SyntheticBlock { id: "blk-1".to_string(), block_type: "p".to_string(), content: "TOC text".to_string() }],
-                }
-            ],
-        },
-        SyntheticInput {
-            title: "Doc 5 Stripped".to_string(),
-            table_of_contents: vec![synthetic_gen::TocItem { title: "Ch1".to_string(), anchor_block_id: "blk-1".to_string() }],
-            strip_index_from_pdf: true,
-            sections: vec![
-                SyntheticSection {
-                    section_id: "sec-1".to_string(),
-                    heading: "Chapter 1: Stripped".to_string(),
-                    blocks: vec![SyntheticBlock { id: "blk-1".to_string(), block_type: "p".to_string(), content: "Stripped text".to_string() }],
-                }
-            ],
-        },
-    ];
+
+                inputs.push(SyntheticInput {
+                    title: format!("Doc {} (Ch{}, Tbl{}, Strip{})", doc_index, chapters, has_table, strip),
+                    table_of_contents: toc,
+                    strip_index_from_pdf: strip,
+                    sections,
+                });
+                doc_index += 1;
+            }
+        }
+    }
 
     for (i, input) in inputs.iter().enumerate() {
-        let safe_title = input.title.replace(" ", "_");
+        let safe_title = input.title.replace(" ", "_").replace(":", "_").replace(",", "_").replace("(", "").replace(")", "");
         let json_path = artifacts_dir.join(format!("{}.json", safe_title));
         fs::write(&json_path, serde_json::to_string_pretty(input).unwrap()).unwrap();
 
@@ -274,7 +281,6 @@ fn test_e2e_synthetic_validation() {
         generate_synthetic_pdf(pdf_path_str, input).expect("Failed to generate PDF");
 
         let doc_id = format!("doc-uuid-{}-{}", i, sha2_hash(pdf_path_str));
-        // let _pdfium = ... 
         let extractor = RealPdfExtractor { document_id: doc_id.clone(), pdf_path: pdf_path_str.to_string() };
         let page_extraction = extractor.extract_page(1).unwrap();
         
@@ -299,46 +305,62 @@ fn test_e2e_synthetic_validation() {
             document_id: doc_id.clone(),
         };
         
-        let state = AgentState::new(dbs);
-        let chunk = ExtractionChunk { document_id: doc_id.clone(), chunk_index: 1, raw_text: page_extraction.raw_text.clone() };
-        ingest_chunk_to_agent_db(&state.databases.agent_db, &chunk).unwrap();
+        let mut state = AgentState::new(dbs);
+        state.inference_override = Some(mock_agent_inference);
+
+        // Prepare processing jobs
+        state.databases.agent_db.execute("INSERT INTO processing_jobs (id, document_id, status) VALUES ('job_1', ?, 'pending')", params![doc_id.clone()]).unwrap();
         
-        let mut sort_order = 0;
-        for section in &input.sections {
-            let sec_id = format!("{}-{}", doc_id, section.section_id);
-            state.databases.agent_db.execute(
-                "INSERT INTO sections (id, document_id, title, depth_level, sort_order) VALUES (?, ?, ?, ?, ?)",
-                params![sec_id.clone(), doc_id.clone(), section.heading.clone(), 1, sort_order],
-            ).unwrap();
+        let text = page_extraction.raw_text.clone();
+        if !text.trim().is_empty() {
+            let chunk_id = "chunk_0".to_string();
+            state.databases.agent_db.execute("INSERT INTO pass1_chunks (id, document_id, raw_layout_text) VALUES (?, ?, ?)", params![chunk_id.clone(), doc_id.clone(), text]).unwrap();
+            state.databases.agent_db.execute("INSERT INTO job_chunks (id, job_id, raw_text, chunk_order) VALUES (?, 'job_1', ?, ?)", params![chunk_id, text.clone(), 0]).unwrap();
             
-            for block in &section.blocks {
-                let block_id = format!("{}-{}", doc_id, block.id);
-                state.databases.agent_db.execute(
-                    "INSERT INTO blocks (id, section_id, document_id, block_type, content, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-                    params![block_id, sec_id.clone(), doc_id.clone(), block.block_type.clone(), block.content.clone(), sort_order],
-                ).unwrap();
-                sort_order += 1;
+            let chunk = contracts::ExtractionChunk {
+                document_id: doc_id.clone(),
+                chunk_index: 0,
+                raw_text: text,
+            };
+            
+            ingest_chunk_to_agent_db(&state.databases.agent_db, &chunk).unwrap();
+        }
+
+        // Run the agent loop until it completes or pauses
+        loop {
+            let status = state.step().unwrap();
+            if status == agent_harness::agent::AgentStatus::Completed || matches!(status, agent_harness::agent::AgentStatus::WaitingForHuman(_)) {
+                break;
             }
         }
         
         migrate_agent_to_content(state.databases.agent_db_path.as_str(), state.databases.content_db_path.as_str(), &doc_id).unwrap();    
 
-        // Query the DB output to assert it matches the original JSON structures
+        // Query the DB output to assert agent extracted *some* content
         let mut stmt = state.databases.content_db.prepare("SELECT content FROM blocks WHERE document_id = ? ORDER BY sort_order").unwrap();
-        let db_blocks: Vec<String> = stmt.query_map(params![doc_id], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+        let db_blocks: Vec<String> = stmt.query_map(params![doc_id.clone()], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
         
-        let expected_blocks: Vec<String> = input.sections.iter().flat_map(|s| s.blocks.iter().map(|b| b.content.clone())).collect();
-        assert_eq!(db_blocks, expected_blocks, "Database output does not match original JSON structures for doc {}", input.title);
+        assert!(!db_blocks.is_empty(), "Agent flow failed to produce content for doc {}", input.title);
+
+        // Loosely test against the origin JSON by verifying that paragraph text was extracted
+        let expected_texts: Vec<String> = input.sections.iter()
+            .flat_map(|s| s.blocks.iter().filter(|b| b.block_type == "p").map(|b| b.content.clone()))
+            .collect();
+            
+        let combined_db_text = db_blocks.join(" ");
+        for expected in expected_texts {
+            assert!(combined_db_text.contains(&expected), "DB missing expected text '{}' for doc {}", expected, input.title);
+        }
     }
 
     let content_conn = Connection::open(&content_db_path).unwrap();
     let mut stmt = content_conn.prepare("SELECT block_id, content FROM blocks_fts").unwrap();
     let fts_rows: Vec<(String, String)> = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().map(Result::unwrap).collect();
     assert!(!fts_rows.is_empty(), "FTS virtual table is empty.");
-    for (block_id, fts_content) in &fts_rows {
+    for (_block_id, fts_content) in &fts_rows {
         assert!(!fts_content.contains("\"text\":"), "FTS content contains JSON key pollution");
     }
 
-    cleanup_mock_inference();
+    inference::teardown_inference_context();
     println!("ALL INTEGRATION TEST PHASES COMPLETED SUCCESSFULLY!");
 }

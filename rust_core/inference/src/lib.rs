@@ -42,6 +42,33 @@ struct LlamaContext {
 unsafe impl Send for LlamaContext {}
 unsafe impl Sync for LlamaContext {}
 
+impl Drop for LlamaContext {
+    fn drop(&mut self) {
+        #[cfg(feature = "llama_native")]
+        {
+            if !self.native_context_ptr.is_null() {
+                unsafe {
+                    llama_cpp_sys_2::llama_free(self.native_context_ptr as *mut llama_cpp_sys_2::llama_context);
+                }
+            }
+            if !self.native_model_ptr.is_null() {
+                unsafe {
+                    llama_cpp_sys_2::llama_free_model(self.native_model_ptr);
+                }
+            }
+        }
+        #[cfg(not(feature = "llama_native"))]
+        {
+            if !self.native_context_ptr.is_null() {
+                unsafe {
+                    let _ = Box::from_raw(self.native_context_ptr as *mut i32);
+                }
+            }
+        }
+    }
+}
+
+
 /// Configuration payload for hardware neural network acceleration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpuConfig {
@@ -185,10 +212,12 @@ fn update_heap_stats_on_dealloc(bytes_deallocated: u64) {
 
 /// Initializes local llama.cpp model context and hardware acceleration (e.g. NPU, DSP, NEON).
 /// Dynamically locates the dynamic shared library and configures neural processors.
-pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
+pub fn initialize_inference_context(model_url_or_path: &str) -> Result<(), AppError> {
     let mut ctx_guard = get_llama_context().lock().map_err(|e| AppError::Generic(format!("Mutex lock poison error: {}", e)))?;
     
     // Safety check & platform fallback resolution
+    *ctx_guard = None;
+
     let lib_name = if cfg!(target_os = "windows") {
         "llama.dll"
     } else if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
@@ -199,11 +228,30 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
 
     println!("[Inference] Attempting runtime dynamic FFI resolution for: {}", lib_name);
 
+    let final_model_path = if model_url_or_path.starts_with("http://") || model_url_or_path.starts_with("https://") {
+        let file_name = model_url_or_path.split('/').last().unwrap_or("model.gguf");
+        let cache_dir = std::env::temp_dir().join("doc_ingest_models");
+        std::fs::create_dir_all(&cache_dir).map_err(|e| AppError::Generic(format!("Failed to create model cache directory: {}", e)))?;
+        let target_path = cache_dir.join(file_name);
+        
+        println!("[Inference] Model URL provided. Downloading/Verifying at {:?}", target_path);
+        downloader::ModelDownloader::download_model(
+            model_url_or_path,
+            &target_path,
+            None,
+            None::<fn(f64)>,
+        )?;
+        
+        target_path.to_string_lossy().to_string()
+    } else {
+        model_url_or_path.to_string()
+    };
+
     // Standard pre-check to verify model weight existence before loading
-    if !std::path::Path::new(model_path).exists() {
+    if !std::path::Path::new(&final_model_path).exists() {
         return Err(AppError::Generic(format!(
             "Model weights file not found at path: {}. Please download a valid GGUF file.",
-            model_path
+            final_model_path
         )));
     }
 
@@ -230,7 +278,10 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
     {
         unsafe {
             // Initialize backend
-            llama_cpp_sys_2::llama_backend_init();
+            static INIT_BACKEND: std::sync::Once = std::sync::Once::new();
+            INIT_BACKEND.call_once(|| {
+                llama_cpp_sys_2::llama_backend_init();
+            });
 
             // Setup model params
             let mut model_params = llama_cpp_sys_2::llama_model_default_params();
@@ -240,7 +291,7 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
                 model_params.n_gpu_layers = cfg.gpu_layers_offload as i32;
             }
 
-            let c_model_path = CString::new(model_path)?;
+            let c_model_path = CString::new(final_model_path.as_str())?;
             let model = llama_cpp_sys_2::llama_load_model_from_file(c_model_path.as_ptr(), model_params);
             if model.is_null() {
                 return Err(AppError::Generic(format!("Failed to load llama.cpp model from file")));
@@ -248,7 +299,9 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
 
             // Setup context params
             let mut ctx_params = llama_cpp_sys_2::llama_context_default_params();
-            ctx_params.n_ctx = 2048; // Limit context window to prevent memory spike
+            ctx_params.n_ctx = 4096; // Increased context size
+            ctx_params.n_batch = 2048;
+            ctx_params.n_ubatch = 2048; // Set ubatch equal to batch to avoid chunking issues
             
             let context = llama_cpp_sys_2::llama_new_context_with_model(model, ctx_params);
             if context.is_null() {
@@ -257,7 +310,7 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
             }
 
             *ctx_guard = Some(LlamaContext {
-                model_path: model_path.to_string(),
+                model_path: final_model_path.clone(),
                 hardware_accelerated: hw_accelerated,
                 native_model_ptr: model,
                 native_context_ptr: context as *mut std::ffi::c_void,
@@ -271,7 +324,7 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
         let dummy_ctx_ptr = Box::into_raw(Box::new(42)) as *mut std::ffi::c_void;
 
         *ctx_guard = Some(LlamaContext {
-            model_path: model_path.to_string(),
+            model_path: final_model_path.clone(),
             hardware_accelerated: hw_accelerated,
             native_context_ptr: dummy_ctx_ptr,
         });
@@ -281,6 +334,15 @@ pub fn initialize_inference_context(model_path: &str) -> Result<(), AppError> {
     update_heap_stats_on_alloc(250_000_000);
 
     Ok(())
+}
+
+
+/// Safely tears down the active inference context, ensuring Drop implementations are called
+/// to release underlying native/GPU memory.
+pub fn teardown_inference_context() {
+    if let Ok(mut guard) = get_llama_context().lock() {
+        *guard = None; // This triggers the Drop implementation and frees the Metal buffers properly
+    }
 }
 
 fn clean_json_markers(input: &str) -> String {
@@ -1062,5 +1124,67 @@ pub extern "C" fn download_model_ffi(
             eprintln!("FFI model download failed: {:?}", e);
             -5
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_teardown_inference_context_clears_context() {
+        teardown_inference_context();
+        
+        {
+            let mut guard = get_llama_context().lock().unwrap();
+            *guard = Some(LlamaContext {
+                model_path: "fake_model_path.gguf".to_string(),
+                hardware_accelerated: false,
+                #[cfg(feature = "llama_native")]
+                native_model_ptr: std::ptr::null_mut(),
+                native_context_ptr: std::ptr::null_mut(),
+            });
+        }
+        
+        assert!(get_llama_context().lock().unwrap().is_some());
+        
+        teardown_inference_context();
+        
+        assert!(get_llama_context().lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_llama_context_drop_with_null_pointers() {
+        let ctx = LlamaContext {
+            model_path: "fake_model_path.gguf".to_string(),
+            hardware_accelerated: false,
+            #[cfg(feature = "llama_native")]
+            native_model_ptr: std::ptr::null_mut(),
+            native_context_ptr: std::ptr::null_mut(),
+        };
+        
+        drop(ctx);
+    }
+
+    #[test]
+    fn test_initialize_inference_context_invalid_path_errors_gracefully() {
+        teardown_inference_context();
+        
+        let invalid_path = "invalid_path.gguf";
+        
+        // Ensure the path does not actually exist.
+        let _ = std::fs::remove_file(invalid_path);
+        
+        let res = initialize_inference_context(invalid_path);
+        
+        assert!(res.is_err());
+        match res {
+            Err(AppError::Generic(msg)) => {
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected generic error about not found"),
+        }
+        
+        teardown_inference_context();
     }
 }

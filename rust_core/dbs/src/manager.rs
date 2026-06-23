@@ -105,12 +105,12 @@ pub fn migrate_agent_to_content(agent_db_path: &str, content_db_path: &str, docu
     ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
     tx.execute(
-        "INSERT OR IGNORE INTO main.job_chunks SELECT * FROM scratch.job_chunks WHERE job_id IN (SELECT id FROM scratch.processing_jobs WHERE document_id = ?)",
+        "INSERT OR IGNORE INTO main.processing_jobs SELECT * FROM scratch.processing_jobs WHERE document_id = ?",
         [document_id],
     ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
     tx.execute(
-        "INSERT OR IGNORE INTO main.processing_jobs SELECT * FROM scratch.processing_jobs WHERE document_id = ?",
+        "INSERT OR IGNORE INTO main.job_chunks SELECT * FROM scratch.job_chunks WHERE job_id IN (SELECT id FROM scratch.processing_jobs WHERE document_id = ?)",
         [document_id],
     ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
     
