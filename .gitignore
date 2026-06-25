@@ -156,6 +156,13 @@ temp/
 !/test_artifacts/test_inputs/
 *.part
 *.lock
+
+# ------------------------------------------
+# Python Virtual Environments
+# ------------------------------------------
+venv/
+.venv/
+
 # ------------------------------------------
 # Third Party / gclient Downloads
 # ------------------------------------------
