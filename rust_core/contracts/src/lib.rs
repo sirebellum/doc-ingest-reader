@@ -14,6 +14,7 @@ pub enum BlockType {
     Code,
     Image,
     Quote,
+    List,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -90,7 +91,9 @@ pub struct ListItem {
 pub struct ExtractedBlock {
     pub block_type: BlockType,
     pub content: ASTNode,
+    #[serde(default)]
     pub hyperlink_targets: Vec<String>,
+    #[serde(default)]
     pub semantic_tags: Vec<String>,
 }
 
@@ -166,7 +169,9 @@ pub struct MultiFormatExtraction {
     pub document_id: String,
     pub source_type: String,
     pub title: String,
-    #[ts(optional)] pub author: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     pub sections: Vec<StructuredSection>,
     pub blocks: Vec<StructuredBlock>,
     pub extracted_images: Vec<ExtractedImageMetadata>,
@@ -229,7 +234,9 @@ pub struct Block {
     pub block_type: String,
     pub content: String,
     pub sort_order: i32,
-    #[ts(optional)] pub estimated_height: Option<f32>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_height: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -240,11 +247,21 @@ pub struct Annotation {
     pub block_id: Option<String>,
     pub annotation_type: String,
     pub color_code: String,
-    #[ts(optional)] pub highlighted_text: Option<String>,
-    #[ts(optional)] pub note_body: Option<String>,
-    #[ts(optional)] pub anchor_metadata: Option<String>,
-    #[ts(optional)] pub created_at: Option<String>,
-    #[ts(optional)] pub updated_at: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub highlighted_text: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note_body: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_metadata: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -260,8 +277,12 @@ pub struct Document {
     pub id: String,
     pub title: String,
     pub sha256_hash: String,
-    #[ts(optional)] pub author: Option<String>,
-    #[ts(optional)] pub source_type: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
