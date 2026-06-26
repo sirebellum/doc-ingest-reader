@@ -1,6 +1,6 @@
 use parser::{
     BlockType, ExtractedBlock, LLMStructuringOutput, LayoutHint, MockPdfExtractor,
-    PageExtraction, PdfExtractor, parse_pdf, sha2_hash, ASTNode,
+    PageExtraction, PdfExtractor, parse_pdf, parse_html, parse_markdown, parse_epub, sha2_hash, ASTNode, MultiFormatExtraction,
 };
 
 #[test]
@@ -90,4 +90,71 @@ fn test_parse_pdf_function() {
     let deserialized: PageExtraction = serde_json::from_str(&res).unwrap();
     assert_eq!(deserialized.page_number, 1);
     assert_eq!(deserialized.document_id, format!("doc-uuid-{}", sha2_hash("sample.pdf")));
+}
+
+#[test]
+fn test_parse_html_multiple_scripts() {
+    use std::fs::File;
+    use std::io::Write;
+    let path = "test_multiple_scripts.html";
+    let mut file = File::create(path).unwrap();
+    file.write_all(b"<html><head><title>Test</title></head><body><script>alert(1);</script><p>Hello</p><script>alert(2);</script></body></html>").unwrap();
+    
+    let res = parse_html(path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    
+    assert!(!res.contains("alert(1)"));
+    assert!(!res.contains("alert(2)"));
+    assert!(res.contains("Hello"));
+}
+
+#[test]
+fn test_parse_html_tags_with_attributes() {
+    use std::fs::File;
+    use std::io::Write;
+    let path = "test_html_attributes.html";
+    let mut file = File::create(path).unwrap();
+    file.write_all(b"<html><head id=\"main-head\" class=\"meta\"><title>Test</title></head><body><script src=\"app.js\"></script><p>Hello</p><script type=\"text/javascript\">alert(2);</script></body></html>").unwrap();
+    
+    let res = parse_html(path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    
+    assert!(!res.contains("alert(2)"));
+    assert!(!res.contains("app.js"));
+    assert!(!res.contains("main-head"));
+    assert!(res.contains("Hello"));
+}
+
+#[test]
+fn test_parse_markdown_multibyte_and_headings() {
+    use std::fs::File;
+    use std::io::Write;
+    let path = "test_markdown_multibyte.md";
+    let mut file = File::create(path).unwrap();
+    // Test multibyte text in heading, and ensure space requirement is respected
+    // "###标题" (no space) should be parsed as a paragraph (or just ignored as heading)
+    // "## 标题" (with space) should be parsed as a heading
+    file.write_all("## 标题\nSome text\n###NoSpaceHeading\n".as_bytes()).unwrap();
+    
+    let res = parse_markdown(path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    
+    let extraction: MultiFormatExtraction = serde_json::from_str(&res).unwrap();
+    
+    // There should be a default section, and then "标题" section
+    assert!(extraction.sections.iter().any(|s| s.title == "标题"));
+    
+    // "###NoSpaceHeading" should not be a section because of missing space
+    assert!(!extraction.sections.iter().any(|s| s.title == "NoSpaceHeading"));
+}
+
+#[test]
+fn test_parse_epub_scaffold() {
+    // We don't have a real epub, but parse_epub has a fallback to simulated content
+    let path = "nonexistent_simulated.epub";
+    let res = parse_epub(path).unwrap();
+    let extraction: MultiFormatExtraction = serde_json::from_str(&res).unwrap();
+    
+    assert_eq!(extraction.source_type, "epub");
+    assert_eq!(extraction.title, "EPUB Document");
 }

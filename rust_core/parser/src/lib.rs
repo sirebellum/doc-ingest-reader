@@ -145,6 +145,7 @@ impl PdfExtractor for RealPdfExtractor {
                     let char_str = c.unicode_string().unwrap_or_default();
                     let font_size = c.text_object().map(|obj| obj.unscaled_font_size().value).unwrap_or(10.0);
                     
+                    #[cfg(feature = "verbose-logging")]
                     contracts::log_debug!(
                         "PASS_1",
                         "Parser",
@@ -156,6 +157,7 @@ impl PdfExtractor for RealPdfExtractor {
                     if char_str.trim().is_empty() {
                         if !current_snippet.is_empty() {
                             if let Some(bbox) = current_bbox {
+                                #[cfg(feature = "verbose-logging")]
                                 contracts::log_debug!(
                                     "PASS_1",
                                     "Parser",
@@ -190,6 +192,7 @@ impl PdfExtractor for RealPdfExtractor {
             // Push remaining trailing snippet
             if !current_snippet.is_empty() {
                 if let Some(bbox) = current_bbox {
+                    #[cfg(feature = "verbose-logging")]
                     contracts::log_debug!(
                         "PASS_1",
                         "Parser",
@@ -275,13 +278,15 @@ impl PdfExtractor for RealPdfExtractor {
             }
 
             #[cfg(feature = "verbose-logging")]
-            let token_stream_words = final_raw_text.split_whitespace().count();
-            contracts::log_debug!(
-                "PASS_1",
-                "Parser",
-                "Completed layout-corrected text stream construction",
-                format!("Bytes: {}, Words: {}, Status: Success", final_raw_text.len(), token_stream_words)
-            );
+            {
+                let token_stream_words = final_raw_text.split_whitespace().count();
+                contracts::log_debug!(
+                    "PASS_1",
+                    "Parser",
+                    "Completed layout-corrected text stream construction",
+                    format!("Bytes: {}, Words: {}, Status: Success", final_raw_text.len(), token_stream_words)
+                );
+            }
 
             Ok(PageExtraction {
                 document_id: self.document_id.clone(),
@@ -434,13 +439,18 @@ pub fn parse_markdown(local_path: &str) -> Result<String, AppError> {
 
         if line.starts_with('#') {
             let mut depth_val: u32 = 0;
-            let mut chars = line.chars();
-            while chars.next() == Some('#') {
-                depth_val += 1;
+            for c in line.chars() {
+                if c == '#' {
+                    depth_val += 1;
+                } else {
+                    break;
+                }
             }
-            let title = line[depth_val as usize..].trim().to_string();
             
-            if depth_val > 0 {
+            let after_hashes = &line[depth_val as usize..];
+            if depth_val > 0 && depth_val <= 6 && (after_hashes.is_empty() || after_hashes.starts_with(' ')) {
+                let title = after_hashes.trim().to_string();
+                
                 section_counter += 1;
                 let sec_id = format!("sec-md-{}-{}", doc_id, section_counter);
                 
@@ -727,11 +737,21 @@ pub fn parse_html(local_path: &str) -> Result<String, AppError> {
 
     let mut working_content = content.clone();
     
-    if let (Some(head_start), Some(head_end)) = (working_content.find("<head>"), working_content.find("</head>")) {
-        working_content.drain(head_start..head_end + 7);
-    }
-    if let (Some(script_start), Some(script_end)) = (working_content.find("<script>"), working_content.find("</script>")) {
-        working_content.drain(script_start..script_end + 9);
+    for tag in ["head", "script"].iter() {
+        let open_prefix = format!("<{}", tag);
+        let close_tag = format!("</{}>", tag);
+        let mut offset = 0;
+        while let Some(start) = working_content[offset..].find(&open_prefix) {
+            let abs_start = offset + start;
+            let after_prefix = &working_content[abs_start + open_prefix.len()..];
+            if after_prefix.starts_with('>') || after_prefix.starts_with(' ') || after_prefix.starts_with('\n') {
+                if let Some(end) = working_content[abs_start..].find(&close_tag) {
+                    working_content.drain(abs_start..abs_start + end + close_tag.len());
+                    continue;
+                }
+            }
+            offset = abs_start + open_prefix.len();
+        }
     }
 
     let mut remaining = &working_content[..];
@@ -1012,7 +1032,8 @@ pub fn parse_epub(local_path: &str) -> Result<String, AppError> {
     Ok(serde_json::to_string(&extraction)?)
 }
 
-/// Helper function to parse a PDF file and return the raw JSON representation
+/// Helper function to parse a PDF file and return the raw JSON representation.
+/// Note: This function currently only processes page 1 of the PDF.
 pub fn parse_pdf(local_path: &str) -> Result<String, AppError> {
     let path = std::path::Path::new(local_path);
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
@@ -1032,11 +1053,12 @@ pub fn parse_pdf(local_path: &str) -> Result<String, AppError> {
                 document_id,
                 pdf_path: local_path.to_string(),
             };
-            // Parse first page
+            // TODO: Implement full multi-page parsing. Currently hardcoded to extract only page 1.
             let page = extractor.extract_page(1)?;
             Ok(serde_json::to_string(&page)?)
         } else {
             let extractor = MockPdfExtractor { document_id };
+            // TODO: Implement full multi-page parsing. Currently hardcoded to extract only page 1.
             let page = extractor.extract_page(1)?;
             Ok(serde_json::to_string(&page)?)
         }
