@@ -18,4 +18,6 @@ sha2 = "0.10"
 llama_native = ["dep:llama-cpp-sys-2"]
 verbose-logging = ["contracts/verbose-logging"]
 
-
+[dev-dependencies]
+serial_test = "3.1.1"
+httpmock = "0.7"

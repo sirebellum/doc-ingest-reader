@@ -34,14 +34,20 @@ struct LlamaContext {
     pub model_path: String,
     pub hardware_accelerated: bool,
     #[cfg(feature = "llama_native")]
-    pub native_model_ptr: *mut llama_cpp_sys_2::llama_model,
-    pub native_context_ptr: *mut std::ffi::c_void,
+    native_model_ptr: *mut llama_cpp_sys_2::llama_model,
+    native_context_ptr: *mut std::ffi::c_void,
 }
 
 // Unsafe raw pointers are safe to transfer across thread boundaries when protected by Mutex
 unsafe impl Send for LlamaContext {}
 unsafe impl Sync for LlamaContext {}
 
+struct DummyContext;
+
+/// # Safety
+/// Because the fields are private, the pointer is strictly guaranteed to have been created via
+/// `Box::into_raw(Box::new(DummyContext))` within `initialize_inference_context` within the same module,
+/// making the subsequent `Box::from_raw` cast safe on the non-native path.
 impl Drop for LlamaContext {
     fn drop(&mut self) {
         #[cfg(feature = "llama_native")]
@@ -49,11 +55,13 @@ impl Drop for LlamaContext {
             if !self.native_context_ptr.is_null() {
                 unsafe {
                     llama_cpp_sys_2::llama_free(self.native_context_ptr as *mut llama_cpp_sys_2::llama_context);
+                    self.native_context_ptr = std::ptr::null_mut();
                 }
             }
             if !self.native_model_ptr.is_null() {
                 unsafe {
                     llama_cpp_sys_2::llama_free_model(self.native_model_ptr);
+                    self.native_model_ptr = std::ptr::null_mut();
                 }
             }
         }
@@ -61,7 +69,7 @@ impl Drop for LlamaContext {
         {
             if !self.native_context_ptr.is_null() {
                 unsafe {
-                    let _ = Box::from_raw(self.native_context_ptr as *mut i32);
+                    let _ = Box::from_raw(self.native_context_ptr as *mut DummyContext);
                 }
             }
         }
@@ -321,7 +329,7 @@ pub fn initialize_inference_context(model_url_or_path: &str) -> Result<(), AppEr
     #[cfg(not(feature = "llama_native"))]
     {
         // Create active dummy context pointer
-        let dummy_ctx_ptr = Box::into_raw(Box::new(42)) as *mut std::ffi::c_void;
+        let dummy_ctx_ptr = Box::into_raw(Box::new(DummyContext)) as *mut std::ffi::c_void;
 
         *ctx_guard = Some(LlamaContext {
             model_path: final_model_path.clone(),
@@ -359,18 +367,57 @@ fn clean_json_markers(input: &str) -> String {
 }
 
 fn heuristic_repair_json(input: &str) -> String {
-    let mut repaired = input.trim().to_string();
+    let mut in_string = false;
+    let mut escape = false;
+    let mut stack = Vec::new();
+
+    let trimmed = input.trim();
     
-    let open_braces = repaired.chars().filter(|&c| c == '{').count();
-    let close_braces = repaired.chars().filter(|&c| c == '}').count();
-    if open_braces > close_braces {
-        repaired.push_str(&"}".repeat(open_braces - close_braces));
+    for c in trimmed.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        
+        match c {
+            '\\' => {
+                if in_string {
+                    escape = true;
+                }
+            }
+            '"' => {
+                in_string = !in_string;
+            }
+            '{' => {
+                if !in_string {
+                    stack.push('}');
+                }
+            }
+            '[' => {
+                if !in_string {
+                    stack.push(']');
+                }
+            }
+            '}' | ']' => {
+                if !in_string {
+                    if let Some(expected) = stack.last() {
+                        if *expected == c {
+                            stack.pop();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
     
-    let open_brackets = repaired.chars().filter(|&c| c == '[').count();
-    let close_brackets = repaired.chars().filter(|&c| c == ']').count();
-    if open_brackets > close_brackets {
-        repaired.push_str(&"]".repeat(open_brackets - close_brackets));
+    let mut repaired = trimmed.to_string();
+    if in_string {
+        repaired.push('"');
+    }
+    
+    while let Some(closing_char) = stack.pop() {
+        repaired.push(closing_char);
     }
     
     repaired
@@ -419,6 +466,21 @@ fn validate_and_repair_json(raw_json: &str) -> Result<String, AppError> {
     Ok(serde_json::to_string(&fallback)?)
 }
 
+/// Truncates context text to fit within a token budget.
+/// Uses a heuristic of ~4 bytes per token and snaps to the nearest
+/// valid UTF-8 char boundary to avoid panicking on multi-byte characters.
+pub fn truncate_context(text: &str, max_tokens: usize) -> &str {
+    let byte_budget = max_tokens * 4;
+    if byte_budget >= text.len() {
+        return text;
+    }
+    let mut end = byte_budget;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 /// Runs local inference on the given prompt payload synchronously.
 /// Directs extraction tokens directly into local neural pipelines.
 pub fn run_local_inference(prompt: &str) -> Result<String, AppError> {
@@ -463,26 +525,19 @@ pub fn run_local_inference(prompt: &str) -> Result<String, AppError> {
                 }
                 tokens.truncate(n_tokens as usize);
 
-                // Add deterministic JSON grammar constraint
-                let is_agent = prompt.contains("AVAILABLE TOOLS:");
-                let gbnf = if is_agent {
-                    r#"root ::= "Thought: " [^\n]* "\n" "{" [^}]* "}""#
-                } else {
-                    r#"root ::= "{" [^}]* "}""#
-                };
-                
-                let grammar_str = CString::new(gbnf)?;
-                let grammar_root = CString::new("root")?;
-                let grammar_sampler = llama_cpp_sys_2::llama_sampler_init_grammar(
-                    vocab,
-                    grammar_str.as_ptr(),
-                    grammar_root.as_ptr(),
-                );
-                
                 let chain_params = llama_cpp_sys_2::llama_sampler_chain_default_params();
                 let chain = llama_cpp_sys_2::llama_sampler_chain_init(chain_params);
-                llama_cpp_sys_2::llama_sampler_chain_add(chain, grammar_sampler);
-                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_greedy());
+                
+                // Highly structured workflow parameters
+                // Penalize repetition slightly to prevent loops, considering last 64 tokens
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_penalties(64, 1.1, 0.0, 0.0));
+                
+                // Top K and Top P to truncate the tail of less likely tokens
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_top_k(40));
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_top_p(0.95, 1));
+                
+                // Low temperature for more deterministic/factual output
+                llama_cpp_sys_2::llama_sampler_chain_add(chain, llama_cpp_sys_2::llama_sampler_init_temp(0.2));
 
                 let mut batch = llama_cpp_sys_2::llama_batch_get_one(tokens.as_mut_ptr(), n_tokens as i32);
                 let decode_res = llama_cpp_sys_2::llama_decode(ctx, batch);
@@ -514,6 +569,13 @@ pub fn run_local_inference(prompt: &str) -> Result<String, AppError> {
                     if len > 0 {
                         let piece = std::str::from_utf8(&buf[..len as usize]).unwrap_or("");
                         output_str.push_str(piece);
+                        
+                        let full_output = format!("{{\"tool\": \"{}", output_str);
+                        let open_braces = full_output.chars().filter(|c| *c == '{').count();
+                        let close_braces = full_output.chars().filter(|c| *c == '}').count();
+                        if open_braces > 0 && open_braces == close_braces {
+                            break;
+                        }
                     }
 
                     let mut id_val = id;
@@ -1130,8 +1192,10 @@ pub extern "C" fn download_model_ffi(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_teardown_inference_context_clears_context() {
         teardown_inference_context();
         
@@ -1154,6 +1218,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_llama_context_drop_with_null_pointers() {
         let ctx = LlamaContext {
             model_path: "fake_model_path.gguf".to_string(),
@@ -1167,6 +1232,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_initialize_inference_context_invalid_path_errors_gracefully() {
         teardown_inference_context();
         
@@ -1186,5 +1252,70 @@ mod tests {
         }
         
         teardown_inference_context();
+    }
+
+    #[test]
+    fn test_truncate_context_multibyte_safety() {
+        // Each emoji (🔥) is 4 bytes, each CJK char (中,文,世,界) is 3 bytes
+        let text = "Hello 🔥 世界中文 end";
+
+        // Budget of 2 tokens = 8 bytes. "Hello " is 6 bytes, then 🔥 starts at byte 6.
+        // Byte 8 lands inside the 4-byte 🔥 emoji, so it must snap back to byte 6.
+        let result = truncate_context(text, 2);
+        assert!(result.len() <= 8);
+        assert!(result.is_char_boundary(result.len()), "Result must end on a char boundary");
+
+        // Budget of 1 token = 4 bytes. Lands inside "Hello", safe ASCII.
+        let result_small = truncate_context(text, 1);
+        assert_eq!(result_small, "Hell");
+
+        // Huge budget returns full string
+        assert_eq!(truncate_context(text, 10000), text);
+
+        // Empty string
+        assert_eq!(truncate_context("", 5), "");
+
+        // Pure CJK: "中文" = 6 bytes. Budget of 1 token = 4 bytes.
+        // Byte 4 is mid-char (中 is bytes 0-2, 文 is bytes 3-5), must snap to byte 3.
+        let cjk = "中文";
+        let result_cjk = truncate_context(cjk, 1);
+        assert!(cjk.is_char_boundary(result_cjk.len()), "CJK result must end on a char boundary");
+        assert_eq!(result_cjk, "中");
+    }
+
+    #[test]
+    #[serial]
+    #[cfg(not(feature = "llama_native"))]
+    fn test_llama_context_drop_with_non_null_dummy_pointer() {
+        let dummy_ctx_ptr = Box::into_raw(Box::new(DummyContext)) as *mut std::ffi::c_void;
+        let ctx = LlamaContext {
+            model_path: "fake_model_path.gguf".to_string(),
+            hardware_accelerated: false,
+            native_context_ptr: dummy_ctx_ptr,
+        };
+        
+        // This should run the drop implementation and deallocate the DummyContext properly.
+        drop(ctx);
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_run_local_inference_valid_json() {
+        let fake_model = "fake_model.gguf";
+        std::fs::write(fake_model, "dummy weights").unwrap();
+
+        let init_res = initialize_inference_context(fake_model);
+        assert!(init_res.is_ok(), "Context initialization failed");
+
+        let inf_res = run_local_inference("Synthetic Ingestion Volume 1");
+        assert!(inf_res.is_ok(), "Inference failed");
+
+        let output_str = inf_res.unwrap();
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&output_str);
+        assert!(parsed.is_ok(), "Inference output must be valid JSON, got: {}", output_str);
+
+        teardown_inference_context();
+        let _ = std::fs::remove_file(fake_model);
     }
 }

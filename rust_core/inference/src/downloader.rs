@@ -332,3 +332,120 @@ impl ModelDownloader {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use sha2::{Digest, Sha256};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn get_temp_path(name: &str) -> PathBuf {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("{}_{}", timestamp, name))
+    }
+
+    #[test]
+    fn test_successful_download() {
+        let server = MockServer::start();
+        let content = b"dummy content";
+        
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200)
+                .body(content);
+        });
+
+        let mut hasher = Sha256::new();
+        hasher.update(content);
+        let expected_sha = format!("{:x}", hasher.finalize());
+
+        let target_path = get_temp_path("model_success.gguf");
+
+        let res = ModelDownloader::download_model(
+            &server.url("/model.gguf"),
+            &target_path,
+            Some(&expected_sha),
+            None::<fn(f64)>,
+        );
+
+        assert!(res.is_ok());
+        assert!(target_path.exists());
+        mock.assert();
+        let _ = fs::remove_file(&target_path);
+    }
+
+    #[test]
+    fn test_network_failure_retry() {
+        let server = MockServer::start();
+        
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(500);
+        });
+
+        let target_path = get_temp_path("model_fail.gguf");
+
+        let res = ModelDownloader::download_model(
+            &server.url("/model.gguf"),
+            &target_path,
+            None,
+            None::<fn(f64)>,
+        );
+
+        assert!(res.is_err());
+        mock.assert_hits(3);
+        let _ = fs::remove_file(&target_path);
+        let _ = fs::remove_file(&target_path.with_extension("part"));
+        let _ = fs::remove_file(&target_path.with_extension("lock"));
+    }
+
+    #[test]
+    fn test_sha256_mismatch() {
+        let server = MockServer::start();
+        let content = b"dummy content";
+        
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200)
+                .body(content);
+        });
+
+        let target_path = get_temp_path("model_mismatch.gguf");
+        let expected_sha = "wronghash";
+
+        let res = ModelDownloader::download_model(
+            &server.url("/model.gguf"),
+            &target_path,
+            Some(expected_sha),
+            None::<fn(f64)>,
+        );
+
+        assert!(res.is_err());
+        assert!(!target_path.exists());
+        assert!(!target_path.with_extension("part").exists());
+        mock.assert();
+        let _ = fs::remove_file(&target_path.with_extension("lock"));
+    }
+
+    #[test]
+    fn test_early_exit_existing_file() {
+        let content = b"dummy content";
+        let mut hasher = Sha256::new();
+        hasher.update(content);
+        let expected_sha = format!("{:x}", hasher.finalize());
+
+        let target_path = get_temp_path("model_existing.gguf");
+        std::fs::write(&target_path, content).unwrap();
+
+        let res = ModelDownloader::download_model(
+            "http://invalid.local/model.gguf",
+            &target_path,
+            Some(&expected_sha),
+            None::<fn(f64)>,
+        );
+
+        assert!(res.is_ok());
+        let _ = fs::remove_file(&target_path);
+    }
+}
