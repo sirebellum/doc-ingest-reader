@@ -93,6 +93,8 @@ std::vector<PropNameID> RustParserBridge::getPropertyNames(Runtime& runtime) {
     std::vector<PropNameID> names;
     names.push_back(PropNameID::forAscii(runtime, "computeSimilarity"));
     names.push_back(PropNameID::forAscii(runtime, "computeBatchSimilarities"));
+    names.push_back(PropNameID::forAscii(runtime, "doc_sync"));
+    names.push_back(PropNameID::forAscii(runtime, "dbs"));
     return names;
 }
 
@@ -122,6 +124,38 @@ Value RustParserBridge::get(Runtime& runtime, const PropNameID& name) {
                 return this->computeBatchSimilarities(rt, args[0], args[1]);
             }
         );
+    } else if (propName == "doc_sync") {
+        class DocSyncBridge : public HostObject {
+        public:
+            Value get(Runtime& rt, const PropNameID& propNameID) override {
+                return Function::createFromHostFunction(
+                    rt, propNameID, 0,
+                    [](Runtime& r, const Value& thisVal, const Value* args, size_t count) -> Value {
+                        return Value::undefined();
+                    }
+                );
+            }
+            std::vector<PropNameID> getPropertyNames(Runtime& rt) override {
+                return {};
+            }
+        };
+        return Object::createFromHostObject(runtime, std::make_shared<DocSyncBridge>());
+    } else if (propName == "dbs") {
+        class DbsBridge : public HostObject {
+        public:
+            Value get(Runtime& rt, const PropNameID& propNameID) override {
+                return Function::createFromHostFunction(
+                    rt, propNameID, 0,
+                    [](Runtime& r, const Value& thisVal, const Value* args, size_t count) -> Value {
+                        return Value::undefined();
+                    }
+                );
+            }
+            std::vector<PropNameID> getPropertyNames(Runtime& rt) override {
+                return {};
+            }
+        };
+        return Object::createFromHostObject(runtime, std::make_shared<DbsBridge>());
     }
     return Value::undefined();
 }

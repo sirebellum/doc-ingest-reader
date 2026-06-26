@@ -7,7 +7,8 @@ async function getDb() {
   // Use unpkg to fetch the wasm file for sql.js
   const SQL = await initSqlJs({ locateFile: file => `https://unpkg.com/sql.js@1.14.1/dist/${file}` });
   try {
-    const response = await fetch('http://127.0.0.1:8080/db');
+    const gatewayUrl = process.env.EXPO_PUBLIC_DB_GATEWAY || 'http://localhost:8080';
+    const response = await fetch(`${gatewayUrl}/db`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const buf = await response.arrayBuffer();
     dbInstance = new SQL.Database(new Uint8Array(buf));
@@ -40,10 +41,30 @@ export const DbsBridge = {
   },
   async getSectionsForDocumentAsync(documentId: string): Promise<any[]> {
     const db = await getDb();
-    return execQuery(db, "SELECT * FROM sections WHERE document_id = ? ORDER BY sort_order", [documentId]);
+    const sections = execQuery(db, "SELECT * FROM sections WHERE document_id = ? ORDER BY sort_order", [documentId]);
+    if (sections.length === 0) {
+      // Check if there are any blocks for this document
+      const blocks = execQuery(db, "SELECT id FROM blocks WHERE document_id = ? LIMIT 1", [documentId]);
+      if (blocks.length > 0) {
+        return [{
+          id: `__unlinked__${documentId}`,
+          document_id: documentId,
+          parent_id: null,
+          title: "Full Document",
+          depth_level: 1,
+          sort_order: 0,
+          created_at: new Date().toISOString()
+        }];
+      }
+    }
+    return sections;
   },
   async getBlocksForSectionAsync(sectionId: string): Promise<any[]> {
     const db = await getDb();
+    if (sectionId && sectionId.startsWith('__unlinked__')) {
+      const docId = sectionId.replace('__unlinked__', '');
+      return execQuery(db, "SELECT * FROM blocks WHERE document_id = ? AND section_id IS NULL ORDER BY sort_order", [docId]);
+    }
     return execQuery(db, "SELECT * FROM blocks WHERE section_id = ? ORDER BY sort_order", [sectionId]);
   },
   async getAnnotationsForBlocksAsync(blockIds: string[]): Promise<any[]> {

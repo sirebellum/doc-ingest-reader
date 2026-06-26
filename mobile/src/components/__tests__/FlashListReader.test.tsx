@@ -63,20 +63,20 @@ describe('FlashListReader Rendering & Scrolling Core', () => {
     });
 
     it('should trigger prev prefetch when scroll position is near the top chapter limit', () => {
-      const action = getScrollAction(150, 1000, 3000, prevSec, nextSec);
+      const action = getScrollAction(-60, 1000, 3000, prevSec, nextSec);
       expect(action).toEqual({ sectionId: 'sec-1', direction: 'prev' });
     });
 
     it('should trigger next prefetch when scroll position is near the bottom chapter limit', () => {
-      const action = getScrollAction(1850, 1000, 3000, prevSec, nextSec);
+      const action = getScrollAction(1950, 1000, 3000, prevSec, nextSec);
       expect(action).toEqual({ sectionId: 'sec-3', direction: 'next' });
     });
 
     it('should return null if scrolling near boundaries but no adjacent sections are configured', () => {
-      const topAction = getScrollAction(150, 1000, 3000, undefined, nextSec);
+      const topAction = getScrollAction(-60, 1000, 3000, undefined, nextSec);
       expect(topAction).toBeNull();
 
-      const bottomAction = getScrollAction(1850, 1000, 3000, prevSec, undefined);
+      const bottomAction = getScrollAction(1950, 1000, 3000, prevSec, undefined);
       expect(bottomAction).toBeNull();
     });
   });

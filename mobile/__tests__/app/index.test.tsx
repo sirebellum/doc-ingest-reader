@@ -87,7 +87,7 @@ describe('LibraryScreen Component Tests', () => {
     expect(doc2).toBeDefined();
   });
 
-  it('should navigate to the Reader dynamic route `/reader/[id]` when a document item is pressed', () => {
+  it('should navigate to the Reader dynamic route `/reader/[id]` when a document item is pressed', async () => {
     const renderTree = create(<LibraryScreen />);
     const root = renderTree.root;
 
@@ -96,18 +96,22 @@ describe('LibraryScreen Component Tests', () => {
     expect(docItem).toBeDefined();
 
     // Simulate pressing first doc item
-    docItem!.props.onPress();
+    await act(async () => {
+      docItem!.props.onPress();
+    });
 
     expect(router.push).toHaveBeenCalledWith('/reader/doc-1');
   });
 
-  it('should prompt the user with LLM ingestion options when "+" is pressed', () => {
+  it('should prompt the user with LLM ingestion options when "+" is pressed', async () => {
     const renderTree = create(<LibraryScreen />);
     const root = renderTree.root;
 
     const uploadBtnText = root.findByProps({ children: '+' });
     const uploadBtn = uploadBtnText.parent;
-    uploadBtn!.props.onPress();
+    await act(async () => {
+      uploadBtn!.props.onPress();
+    });
 
     expect(Alert.alert).toHaveBeenCalledWith(
       'Document Upload Ingestion',
@@ -140,7 +144,9 @@ describe('LibraryScreen Component Tests', () => {
     // Press upload button to trigger alert
     const uploadBtnText = root.findByProps({ children: '+' });
     const uploadBtn = uploadBtnText.parent;
-    uploadBtn!.props.onPress();
+    await act(async () => {
+      uploadBtn!.props.onPress();
+    });
 
     // Find the Cloud Processing button (usually index 2: Local [0], Network [1], Cloud [2])
     const cloudBtn = alertOptions.find(opt => opt.text === 'Cloud Processing (Estimated: ~5-10 mins)');
@@ -188,7 +194,9 @@ describe('LibraryScreen Component Tests', () => {
 
     const uploadBtnText = root.findByProps({ children: '+' });
     const uploadBtn = uploadBtnText.parent;
-    uploadBtn!.props.onPress();
+    await act(async () => {
+      uploadBtn!.props.onPress();
+    });
 
     const localBtn = alertOptions.find(opt => opt.text === 'Local Inference (Estimated: ~45-60 mins)');
     expect(localBtn).toBeDefined();
@@ -217,7 +225,9 @@ describe('LibraryScreen Component Tests', () => {
 
     const uploadBtnText = root.findByProps({ children: '+' });
     const uploadBtn = uploadBtnText.parent;
-    uploadBtn!.props.onPress();
+    await act(async () => {
+      uploadBtn!.props.onPress();
+    });
 
     const cloudBtn = alertOptions.find(opt => opt.text === 'Cloud Processing (Estimated: ~5-10 mins)');
     

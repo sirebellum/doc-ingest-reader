@@ -15,11 +15,20 @@ export function getScrollAction(
   prevSectionId?: string,
   nextSectionId?: string
 ): { sectionId: string; direction: 'prev' | 'next' } | null {
-  const scrollThreshold = contentHeight * 0.1; // 10% proximity window
+  // If content is not yet measured, or fits entirely on the screen, do not auto-paginate.
+  if (contentHeight === 0 || layoutHeight === 0 || contentHeight <= layoutHeight) {
+    return null;
+  }
 
-  if (contentOffsetY <= scrollThreshold && prevSectionId) {
+  // Require overscroll to go to previous section to prevent infinite loops on load
+  // (since contentOffsetY is exactly 0 when the section first loads).
+  if (contentOffsetY < -50 && prevSectionId) {
     return { sectionId: prevSectionId, direction: 'prev' };
-  } else if (contentOffsetY + layoutHeight >= contentHeight - scrollThreshold && nextSectionId) {
+  } 
+  
+  // Proximity trigger for next section (prefetch before hitting the exact bottom)
+  const bottomProximity = 100;
+  if (contentOffsetY + layoutHeight >= contentHeight - bottomProximity && nextSectionId) {
     return { sectionId: nextSectionId, direction: 'next' };
   }
 

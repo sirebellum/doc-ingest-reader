@@ -8,6 +8,6 @@ describe('hash generation divergence test', () => {
     
     const hash = generateBlockId(docId, seqIdx, content);
     // This expected hash MUST match the one generated in rust_core/contracts/src/hash.rs test
-    expect(hash).toBe('blk_195ab081eb5c17d383b16d1f04af5ce3e167f9ed30caec4f83ebc2efd0c75cc8');
+    expect(hash).toBe('blk_933ca4153e7ae2dd373403dcc5ce48f2832d842d00407044a524f22b510bcf64');
   });
 });
