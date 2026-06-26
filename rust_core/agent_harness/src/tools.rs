@@ -136,7 +136,7 @@ impl AgentTool for CreateNode {
             ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
         }
         
-        Ok(format!("{{\"status\": \"success\", \"created_node_id\": \"{}\"}}", id))
+        Ok(serde_json::json!({"status": "success", "created_node_id": id}).to_string())
     }
 }
 
@@ -153,7 +153,7 @@ impl AgentTool for LinkNodes {
             "INSERT OR IGNORE INTO block_tags (block_id, tag_id) VALUES (?1, ?2)",
             rusqlite::params![block_id, tag_id]
         ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
-        Ok(format!("{{\"status\": \"success\", \"linked\": [\"{}\", \"{}\"]}}", block_id, tag_id))
+        Ok(serde_json::json!({"status": "success", "linked": [block_id, tag_id]}).to_string())
     }
 }
 
@@ -174,6 +174,24 @@ impl AgentTool for AskHuman {
         let parsed: serde_json::Value = serde_json::from_str(args)?;
         let question = parsed.get("question").and_then(|v| v.as_str()).unwrap_or("");
         
-        Ok(format!("{{\"status\": \"Waiting for human\", \"question\": \"{}\"}}", question))
+        Ok(serde_json::json!({"status": "Waiting for human", "question": question}).to_string())
+    }
+}
+
+pub struct CreateTag;
+impl AgentTool for CreateTag {
+    fn name(&self) -> &str { "CreateTag" }
+    fn description(&self) -> &str { "Create a new tag to associate with blocks." }
+    fn execute(&self, args: &str, dbs: &AgentDatabases) -> Result<String, AppError> {
+        let parsed: serde_json::Value = serde_json::from_str(args)?;
+        let id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        
+        dbs.agent_db.execute(
+            "INSERT INTO tags (id, name, source) VALUES (?1, ?2, 'agent')",
+            rusqlite::params![id, name]
+        ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        
+        Ok(serde_json::json!({"status": "success", "created_tag_id": id}).to_string())
     }
 }

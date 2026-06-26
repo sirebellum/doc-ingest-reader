@@ -1,4 +1,4 @@
-use agent_harness::tools::{AgentDatabases, AgentTool, QueryVectorDB, ReadContentDB, QueryAgentDB, CreateNode, LinkNodes, ParsingComplete, AskHuman};
+use agent_harness::tools::{AgentDatabases, AgentTool, QueryVectorDB, ReadContentDB, QueryAgentDB, CreateNode, LinkNodes, ParsingComplete, AskHuman, CreateTag};
 use rusqlite::Connection;
 use tempfile::NamedTempFile;
 use dbs::manager::init_agent_db;
@@ -96,13 +96,14 @@ fn test_create_node_section() {
     let args = r#"{
         "type": "section",
         "id": "sec1",
-        "title": "Introduction",
+        "title": "Introduction \"and\" \n \\ backslashes",
         "depth_level": 1,
         "sort_order": 0
     }"#;
     
     let res = tool.execute(args, &dbs).unwrap();
-    assert!(res.contains("success"));
+    let parsed: Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(parsed["status"], "success");
     
     let count: i64 = dbs.agent_db.query_row("SELECT count(*) FROM sections WHERE id = 'sec1'", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -123,11 +124,12 @@ fn test_create_node_block() {
         "id": "blk1",
         "section_id": "sec1",
         "block_type": "paragraph",
-        "content": "some text"
+        "content": "some text with \"quotes\" \n and \\ backslashes"
     }"#;
     
     let res = tool.execute(args, &dbs).unwrap();
-    assert!(res.contains("success"));
+    let parsed: Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(parsed["status"], "success");
     
     let count: i64 = dbs.agent_db.query_row("SELECT count(*) FROM blocks WHERE id = 'blk1'", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -144,18 +146,19 @@ fn test_link_nodes() {
         "INSERT INTO blocks (id, section_id, document_id, content, sort_order) VALUES ('blk1', 'sec1', 'test_doc', 'content', 0)", []
     ).unwrap();
     dbs.agent_db.execute(
-        "INSERT INTO tags (id, name, source) VALUES ('tag1', 'test_tag', 'user')", []
+        "INSERT INTO tags (id, name, source) VALUES ('tag1\n\"\\', 'test_tag', 'user')", []
     ).unwrap();
 
     let tool = LinkNodes;
     
     let args = r#"{
         "block_id": "blk1",
-        "tag_id": "tag1"
+        "tag_id": "tag1\n\"\\"
     }"#;
     
     let res = tool.execute(args, &dbs).unwrap();
-    assert!(res.contains("success"));
+    let parsed: Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(parsed["status"], "success");
     
     let count: i64 = dbs.agent_db.query_row("SELECT count(*) FROM block_tags WHERE block_id = 'blk1'", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -173,7 +176,27 @@ fn test_parsing_complete() {
 fn test_ask_human() {
     let (dbs, _c, _a) = setup_test_dbs();
     let tool = AskHuman;
-    let res = tool.execute(r#"{"question": "How do I do this?"}"#, &dbs).unwrap();
-    assert!(res.contains("Waiting for human"));
-    assert!(res.contains("How do I do this?"));
+    let res = tool.execute(r#"{"question": "What happens if I type \"this\" \n and \\?"}"#, &dbs).unwrap();
+    let parsed: Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(parsed["status"], "Waiting for human");
+    assert_eq!(parsed["question"], "What happens if I type \"this\" \n and \\?");
+}
+
+#[test]
+fn test_create_tag() {
+    let (dbs, _c, _a) = setup_test_dbs();
+    let tool = CreateTag;
+
+    let args = r#"{
+        "id": "tag_test_1",
+        "name": "New Awesome Tag"
+    }"#;
+
+    let res = tool.execute(args, &dbs).unwrap();
+    let parsed: Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(parsed["status"], "success");
+    assert_eq!(parsed["created_tag_id"], "tag_test_1");
+    
+    let count: i64 = dbs.agent_db.query_row("SELECT count(*) FROM tags WHERE id = 'tag_test_1' AND source = 'agent'", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 1);
 }

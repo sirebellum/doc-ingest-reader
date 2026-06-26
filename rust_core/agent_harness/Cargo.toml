@@ -11,6 +11,7 @@ dbs = { path = "../dbs" }
 inference = { path = "../inference" }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 uuid = { version = "1.8", features = ["v4", "fast-rng"] }
+regex = "1.12.4"
 
 [features]
 verbose-logging = ["contracts/verbose-logging", "inference/verbose-logging"]
